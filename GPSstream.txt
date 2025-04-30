@@ -1,0 +1,23 @@
+1. Run Mavproxy on the GCS:
+    (Assume your GCS IP is 192.168.1.100 with subnet 255.255.255.0, Your broadcast IP would be: 192.168.1.255
+    --master=/dev/ttyUSB0: Telemetry module is plugged here.
+    --out=udp:192.168.1.255:14550: Send MAVLink data to all devices on the 192.168.1.x network via UDP port 14550)
+
+        mavproxy.py --master=/dev/ttyUSB0 --baudrate 57600 --out=udp:192.168.1.255:14550
+
+2. Make sure to connect the Raspi to the same network as the GCS:
+3. Make sure pymavlink is downloaded in your raspi:
+        
+        pip install pymavlink
+
+4. Run this python script, This script passively receives GPS messages from any MAVLink stream on port 14550:
+        from pymavlink import mavutil
+
+        # Listen on all interfaces on port 14550
+        mav = mavutil.mavlink_connection('udp:0.0.0.0:14550')
+
+        print("Waiting for GPS messages...")
+        while True:
+            msg = mav.recv_match(type='GPS_RAW_INT', blocking=True)
+            if msg:
+                print(f"Lat: {msg.lat/1e7}, Lon: {msg.lon/1e7}, Alt: {msg.alt/1000} m, Satellites: {msg.satellites_visible}")
