@@ -49,12 +49,13 @@ To set baudrate of the port communication:
 
 -----------------------------> GPS STREAM SET UP <-------------------------------------
 1. Run SITL/ connect to the pixhawk on your GCS:
-    sim_vehicle.py -v ArduCopter -f quad --console --map --out=udp:<raspberry_pi_ip>:14550
 
-2. Run mavproxy on raspi:
-    mavproxy.py --master=udp:0.0.0.0:14550
+2. Hit Ctrl+F --> Select Mavlink --> Under First drop down select UDP client --> Input the IP address of the device and the port --> Hit connect      
 
-3. View GPS coordinates:
+3. On raspi run: 
+     mavproxy.py --master=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14551
+
+4. View GPS coordinates:
     status
 You will see messages like:
     GPS: GPS lock: 3D fix
