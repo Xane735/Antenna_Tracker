@@ -1,0 +1,14 @@
+| Servo # | Servo Wire  | Connects To            |
+| ------- | ----------- | ---------------------- |
+| Servo 1 | Red         | 5V (Pin 2 or 4)        |
+|         | Brown/Black | GND (Pin 6 or any GND) |
+|         | Orange      | GPIO18 (Pin 12)        |
+|         |             |                        |
+| Servo 2 | Red         | 5V (same as above)     |
+|         | Brown/Black | GND (same as above)    |
+|         | Orange      | GPIO13 (Pin 33)        |
+
+1. Every row is interconnected.What ever serial connections to be made must me connected in the same row
+2. Give Common Ground
+3. Since using external power supply for the servos. Do not connect 5V pin of the Raspi
+4. Current code uses GPIO18 (Pin 12) and GPIO13 (Pin 33). 
