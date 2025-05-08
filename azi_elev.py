@@ -17,9 +17,9 @@ def calculate_azimuth(lat_gcs, lon_gcs, lat_uav, lon_uav):
     # Convert from radians to degrees and normalize to 0–360°
     ang_rad = math.degrees(ang_deg)
     fin_ang_rad = (ang_rad + 360) % 360 #Normalizing
-    #print(fin_ang_rad)
+    print(fin_ang_rad)
 
-    return fin_ang_rad
+    #return fin_ang_rad
 
 def calculate_elevation(lat_gcs, lon_gcs, lat_uav, lon_uav, alt_uav):
     # Convert from degrees to radians
@@ -39,9 +39,9 @@ def calculate_elevation(lat_gcs, lon_gcs, lat_uav, lon_uav, alt_uav):
     ang_deg = math.atan(d_h/dist)
     ang_rad = math.degrees(ang_deg)
     fin_ang_rad = (ang_rad + 360) % 360
-    #print(fin_ang_rad)
+    print(fin_ang_rad)
 
-    return fin_ang_rad
+    #return fin_ang_rad
 
 def simulator():
 

@@ -2,6 +2,10 @@ from pymavlink import mavutil
 import math
 import time
 import automate
+import azi_elev
+
+lat_gcs = 13.026971 # Set GCS Latitude
+lon_gcs = 77.563056 # Set GCS Longitude
 
 # Connect as a client (listen for broadcast packets)
 # Use 'tcp:localhost:5762' in the connection string to connect to SITL
@@ -21,17 +25,14 @@ mav.mav.command_long_send(
     0, 0, 0, 0, 0
 )
 
-
-def lat_lon_alt_uav(mav):
-    # Wait for a GLOBAL_POSITION_INT message from the drone
-    msg = mav.recv_match(type='GLOBAL_POSITION_INT', blocking=True)
+def lat_lon_alt_uav(msg):
 
     # Extract altitude from the message (in millimetres, converting it to metres)
     alt = (msg.alt)*1000
 
     # Extract latitude and longitude (in 1E7 format, so divide by 10^7 to get decimal degrees)
-    lati = (msg.lat) / 10000000
-    long = (msg.lon) / 10000000
+    lat = (msg.lat) / 10000000
+    lon = (msg.lon) / 10000000
 
     # Calculate intermediate values for radius of curvature (WGS-84 ellipsoid parameters)
     # Earth's equatorial radius (a) = 6378.137 km
@@ -46,7 +47,15 @@ def lat_lon_alt_uav(mav):
     db = (6356.753 * math.sin(lati))
 
     # Print the estimated new latitude and adjusted heading
-    print(lati, long, alt)
+    print(lat, lon, alt)
+
+def main(mav):
+    while True:
+        msg = mav.recv_match(type='GPS_RAW_INT', blocking=True)
+        if msg: 
+            print(f"Lat: {msg.lat/1e7}, Lon: {msg.lon/1e7}, Alt: {msg.alt/1000} m, Satellites: {msg.satellites_visible}")
+            azi_elev.calculate_azimuth(lat_gcs, lon_gcs, msg.lat, msg.lon)
+            azi_elev.calculate_elevation(lat_gcs, lon_gcs, msg.lat, msg.lon, msg.alt)
 
 def GPS_stream():
 
@@ -56,17 +65,15 @@ def GPS_stream():
     while True:
         msg = mav.recv_match(type='GPS_RAW_INT', blocking=True)
         if msg:
-            print(f"Lat: {msg.lat/1e7}, Lon: {msg.lon/1e7}, Alt: {msg.alt/1000} m, Satellites: {msg.satellites_visible}")
+            #print(f"Lat: {msg.lat/1e7}, Lon: {msg.lon/1e7}, Alt: {msg.alt/1000} m, Satellites: {msg.satellites_visible}")
+            azi_elev.calculate_azimuth(msg.lat)
             
-
-
-while True:
-    automate.loiter(mav)
-    time.sleep(3)
-    automate.arm(mav)
-    time.sleep(3)
-    automate.auto(mav)
-    time.sleep(3)
-    automate.start_mission(mav)
-    time.sleep(3)
-    lat_lon_alt_uav(mav)
+automate.loiter(mav)
+time.sleep(3)
+automate.arm(mav)
+time.sleep(3)
+automate.auto(mav)
+time.sleep(3)
+automate.start_mission(mav)
+time.sleep(3)
+main(mav)
