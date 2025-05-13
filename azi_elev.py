@@ -29,7 +29,7 @@ def calculate_elevation(lat_gcs, lon_gcs, lat_uav, lon_uav, alt_uav):
     lon_uav = math.radians(lon_uav)
 
     R = 6371e3  # Earth's radius in meters
-    alt_gcs = 6  # Altitude of GCS in meters
+    alt_gcs = 1  # Altitude of GCS in meters
     d_lon = lon_uav - lon_gcs
     d_lat = lat_uav - lat_gcs
     d_h = alt_uav - alt_gcs
