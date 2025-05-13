@@ -90,15 +90,15 @@ def lat_lon_alt_uav(msg):
     print(lat, lon, alt)
 
 def main(mav):
-    print("Initializing Mission")
-    loiter(mav)
-    time.sleep(3)
-    arm(mav)
-    time.sleep(3)
-    auto(mav)
-    time.sleep(3)
-    start_mission(mav)
-    time.sleep(3)
+    #print("Initializing Mission")
+    #loiter(mav)
+    #time.sleep(3)
+    #arm(mav)
+    #time.sleep(3)
+    #auto(mav)
+    #time.sleep(3)
+    #start_mission(mav)
+    #time.sleep(3)
     GPS_stream(mav)
 
 def GPS_stream():
