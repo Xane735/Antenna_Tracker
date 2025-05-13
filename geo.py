@@ -99,7 +99,7 @@ def main(mav):
     #time.sleep(3)
     #start_mission(mav)
     #time.sleep(3)
-    GPS_stream(mav)
+    GPS_stream()
 
 def GPS_stream():
 
