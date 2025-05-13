@@ -56,6 +56,9 @@ mavproxy.py --master=/dev/ttyUSB0
 3. On raspi run:
    mavproxy.py --master=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14551
 
+   Trying:
+   mavproxy.py --master=udp:0.0.0.0:14550 --out=udp:192.168.1.70:14551
+
 4. View GPS coordinates:
    status
    You will see messages like:
