@@ -27,7 +27,7 @@ mav.mav.command_long_send(
 def loiter(mav):
     mav.mav.command_long_send(mav.target_system, mav.target_component,
                                      176, 0, 1, 5, 0, 0, 0, 0, 0)
-    msg = mav.recv_match(type='COMMAND_ACK', blocking=True)
+    msg = mav.recv_match(type='COMMAND_ACK', blocking=False)
     print(msg)
     print("Set to Loiter Mode")
 
@@ -35,7 +35,7 @@ def auto(mav):
     mav.mav.command_long_send(mav.target_system, mav.target_component,
                                      176, 0, 1, 3, 0, 0, 0, 0, 0)
 
-    msg = mav.recv_match(type='COMMAND_ACK', blocking=True)
+    msg = mav.recv_match(type='COMMAND_ACK', blocking=False)
     print(msg)
     print("Set to Auto Mode")
 
@@ -44,7 +44,7 @@ def arm(mav):
     mav.mav.command_long_send(mav.target_system, mav.target_component,
                                          400, 0, 1, 0, 0, 0, 0, 0, 0)
 
-    msg = mav.recv_match(type='COMMAND_ACK', blocking=True)
+    msg = mav.recv_match(type='COMMAND_ACK', blocking=False)
     print(msg)
 
 def start_mission(mav):
@@ -59,7 +59,7 @@ def start_mission(mav):
     # Send the start mission command
     mav.mav.send(start_msg)
 
-    test_msg = mav.recv_match(type='MISSION_CURRENT', blocking=True)
+    test_msg = mav.recv_match(type='MISSION_CURRENT', blocking=False)
     print(test_msg)
     print(start_msg)
     print("Auto mission started!")
@@ -109,4 +109,5 @@ def GPS_stream():
             print(f"Lat: {msg.lat/1e7}, Lon: {msg.lon/1e7}, Alt: {msg.alt/1000} m, Satellites: {msg.satellites_visible}")
             azi_elev.calculate_azimuth(lat_gcs, lon_gcs, msg.lat, msg.lon)
             azi_elev.calculate_elevation(lat_gcs, lon_gcs, msg.lat, msg.lon, msg.alt)
-            
+
+main(mav)
