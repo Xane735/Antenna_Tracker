@@ -2,112 +2,101 @@ from pymavlink import mavutil
 import math
 import time
 import azi_elev
+import RPi.GPIO as GPIO
 
-lat_gcs = 13.026971 # Set GCS Latitude
-lon_gcs = 77.563056 # Set GCS Longitude
+lat_gcs = 13.026971
+lon_gcs = 77.563056
 
+# GPIO setup
+GPIO.setmode(GPIO.BCM)
+
+# Servo pins
+SERVO_AZI_PIN = 18 # GPIO18, Pin 12 , Azimuth servo
+SERVO_ELE_PIN = 13 # GPIO13, Pin 33 , Elevation servo
+
+# Setup pins as output
+GPIO.setup(SERVO_AZI_PIN, GPIO.OUT)
+GPIO.setup(SERVO_ELE_PIN, GPIO.OUT)
+
+# Create PWM instances at 50Hz
+servo_azi = GPIO.PWM(SERVO_AZI_PIN, 50)
+servo_ele = GPIO.PWM(SERVO_ELE_PIN, 50)
+
+# Start PWM with neutral duty cycle (7.5%)
+servo_azi.start(0)
+servo_ele.start(0)
+
+# Connect to MAVLink
 # Connect as a client (listen for broadcast packets)
 # Use 'tcp:localhost:5762' in the connection string to connect to SITL
+# For Udp, 'udp:0.0.0.0:14551'
 
 mav = mavutil.mavlink_connection('udp:0.0.0.0:14551')
-
 print("Waiting for heartbeat...")
 mav.wait_heartbeat()
 print("Connected to system (system ID: %d, component ID: %d)" % (mav.target_system, mav.target_component))
+
+# Set message interval
 mav.mav.command_long_send(
-    mav.target_system,
-    mav.target_component,
+    mav.target_system, mav.target_component,
     mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
-    0,
-    mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
-    500000,  # in microseconds (2Hz)
-    0, 0, 0, 0, 0
+    0, mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
+    500000, 0, 0, 0, 0, 0
 )
 
+# Command functions
 def loiter(mav):
-    mav.mav.command_long_send(mav.target_system, mav.target_component,
-                                     176, 0, 1, 5, 0, 0, 0, 0, 0)
+    mav.mav.command_long_send(mav.target_system, mav.target_component, 176, 0, 1, 5, 0, 0, 0, 0, 0)
     msg = mav.recv_match(type='COMMAND_ACK', blocking=False)
-    print(msg)
-    print("Set to Loiter Mode")
+    print(msg, "Set to Loiter Mode")
 
 def auto(mav):
-    mav.mav.command_long_send(mav.target_system, mav.target_component,
-                                     176, 0, 1, 3, 0, 0, 0, 0, 0)
-
+    mav.mav.command_long_send(mav.target_system, mav.target_component, 176, 0, 1, 3, 0, 0, 0, 0, 0)
     msg = mav.recv_match(type='COMMAND_ACK', blocking=False)
-    print(msg)
-    print("Set to Auto Mode")
+    print(msg, "Set to Auto Mode")
 
 def arm(mav):
-    # Arm the drone
-    mav.mav.command_long_send(mav.target_system, mav.target_component,
-                                         400, 0, 1, 0, 0, 0, 0, 0, 0)
-
+    mav.mav.command_long_send(mav.target_system, mav.target_component, 400, 0, 1, 0, 0, 0, 0, 0, 0)
     msg = mav.recv_match(type='COMMAND_ACK', blocking=False)
-    print(msg)
+    print(msg, "Drone Armed")
 
 def start_mission(mav):
-    # Start the mission by sending MAV_CMD_MISSION_START
-    start_msg = mav.mav.command_long_send(
-                            0, 0,
-                            300,
-                            0,  # Confirmation
-                            0, 0, 0, 0, 0, 0, 0  # Parameters for the command (not used in this case)
-                    )       
-
-    # Send the start mission command
-    mav.mav.send(start_msg)
-
+    mav.mav.command_long_send(mav.target_system, mav.target_component, 300, 0, 0, 0, 0, 0, 0, 0, 0)
     test_msg = mav.recv_match(type='MISSION_CURRENT', blocking=False)
-    print(test_msg)
-    print(start_msg)
-    print("Auto mission started!")
+    print(test_msg, "Auto mission started!")
 
+# Servo class
+class Servo:
+    @staticmethod
+    def set_angle(servo_azi, ang_1, servo_ele, ang_2):
+        duty_1 = 2.5 + (ang_1 / 18)
+        duty_2 = 2.5 + (ang_2 / 18)
+        servo_azi.ChangeDutyCycle(duty_1)
+        servo_ele.ChangeDutyCycle(duty_2)
+        time.sleep(0.5)
+        servo_azi.ChangeDutyCycle(0)
+        servo_ele.ChangeDutyCycle(0)
 
-def lat_lon_alt_uav(msg):
-
-    # Extract altitude from the message (in millimetres, converting it to metres)
-    alt = (msg.alt)*1000
-
-    # Extract latitude and longitude (in 1E7 format, so divide by 10^7 to get decimal degrees)
-    lat = (msg.lat) / 10000000
-    lon = (msg.lon) / 10000000
-
-    # Calculate intermediate values for radius of curvature (WGS-84 ellipsoid parameters)
-    # Earth's equatorial radius (a) = 6378.137 km
-    # Earth's polar radius (b) = 6356.753 km
-
-    # Calculate squared terms for radius along latitude
-    na = (6378.137 * 6378.137 * math.cos(lati))
-    nb = (6356.753 * 6356.753 * math.sin(lati))
-
-    # Calculate corresponding cos and sin terms
-    da = (6378.137 * math.cos(lati))
-    db = (6356.753 * math.sin(lati))
-
-    # Print the estimated new latitude and adjusted heading
-    print(lat, lon, alt)
-
-def main(mav):
-    #print("Initializing Mission")
-    #loiter(mav)
-    #time.sleep(3)
-    #arm(mav)
-    #time.sleep(3)
-    #auto(mav)
-    #time.sleep(3)
-    #start_mission(mav)
-    #time.sleep(3)
-    GPS_stream()
-
-def GPS_stream():
-
+# GPS data handling
+def GPS_stream(mav):
     while True:
         msg = mav.recv_match(type='GPS_RAW_INT', blocking=True)
-        if msg: 
-            print(f"Lat: {msg.lat/1e7}, Lon: {msg.lon/1e7}, Alt: {msg.alt/1000} m, Satellites: {msg.satellites_visible}")
-            azi_elev.calculate_azimuth(lat_gcs, lon_gcs, msg.lat, msg.lon)
-            azi_elev.calculate_elevation(lat_gcs, lon_gcs, msg.lat, msg.lon, msg.alt)
+        if msg:
+            lat = msg.lat / 1e7
+            lon = msg.lon / 1e7
+            alt = msg.alt / 1000
+            print(f"Lat: {lat}, Lon: {lon}, Alt: {alt} m, Satellites: {msg.satellites_visible}")
+            azi = azi_elev.calculate_azimuth(lat_gcs, lon_gcs, lat, lon)
+            ele = azi_elev.calculate_elevation(lat_gcs, lon_gcs, lat, lon, alt)
+            Servo.set_angle(servo_azi, azi, servo_ele, ele)
+
+# Entry point
+def main(mav):
+    # Optional flight mode control
+    # loiter(mav)
+    # arm(mav)
+    # auto(mav)
+    # start_mission(mav)
+    GPS_stream(mav)
 
 main(mav)

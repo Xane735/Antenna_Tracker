@@ -5,8 +5,8 @@ import time
 GPIO.setmode(GPIO.BCM)
 
 # Servo pins
-SERVO1_PIN = 18  # GPIO18, Pin 12
-SERVO2_PIN = 13  # GPIO13, Pin 33
+SERVO1_PIN = 18  # GPIO18, Pin 12 , Azimuth servo
+SERVO2_PIN = 13  # GPIO13, Pin 33 , Elevation servo
 
 # Setup pins as output
 GPIO.setup(SERVO1_PIN, GPIO.OUT)

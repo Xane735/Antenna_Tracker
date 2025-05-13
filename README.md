@@ -51,13 +51,10 @@ mavproxy.py --master=/dev/ttyUSB0
 
 1. Run SITL/ connect to the pixhawk on your GCS:
 
-2. Hit Ctrl+F --> Select Mavlink --> Under First drop down select UDP client --> Input the IP address of the device and the port --> Hit connect
+2. Hit Ctrl+F --> Select Mavlink --> Under First drop down select UDP client --> Input the IP address of the device and the port (14550) --> Hit connect
 
 3. On raspi run:
-   mavproxy.py --master=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14551
-
-   Trying:
-   mavproxy.py --master=udp:0.0.0.0:14550 --out=udp:192.168.1.70:14551
+   mavproxy.py --master=udp:0.0.0.0:14550 --out=udp:192.168.1.193:14551
 
 4. View GPS coordinates:
    status
@@ -68,4 +65,5 @@ mavproxy.py --master=/dev/ttyUSB0
    For Raw output of the GPS:
    module load message
    watch GPS_RAW_INT
-5. Run your python script to log the GPS Stream
+
+5. Open another new terminal (Make sure to activate the environment). Run the python script.
