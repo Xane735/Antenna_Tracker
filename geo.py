@@ -6,7 +6,7 @@ import RPi.GPIO as GPIO
 import subprocess
 
 # Start MAVProxy in the background
-print("Initializing Mavproxy")
+'''print("Initializing Mavproxy")
 subprocess.Popen([
     'mavproxy.py',
     '--master=udp:0.0.0.0:14550',     # Or '--master=udp:0.0.0.0:14550' depending on your source; For pixhawk: '--master=/dev/ttyAMA0'
@@ -18,7 +18,7 @@ subprocess.Popen([
 time.sleep(5)
 print("Mavproxy Running...")
 
-# To know if Mavproxy is running: ps aux | grep mavproxy
+# To know if Mavproxy is running: ps aux | grep mavproxy'''
 
 # Latitude and Longitude of the GCS/Antenna Tracker
 LAT_GCS = 13.026971
