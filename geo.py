@@ -4,6 +4,7 @@ import time
 import azi_elev_2
 import RPi.GPIO as GPIO
 import subprocess
+from simple_pid import PID
 
 # Start MAVProxy in the background
 '''print("Initializing Mavproxy")
@@ -21,8 +22,16 @@ print("Mavproxy Running...")
 # To know if Mavproxy is running: ps aux | grep mavproxy'''
 
 # Latitude and Longitude of the GCS/Antenna Tracker
-LAT_GCS = 13.026971
-LON_GCS = 77.563056
+GCS_LAT = 13.0269709
+GCS_LON = 77.5630563
+GCS_ALT = 1
+
+# PID Controllers (tune these values)
+AZI_PID = PID(Kp=1.0, Ki=0.01, Kd=0.2, setpoint=0)
+AZI_PID.output_limits = (-10, 10)  # Limits in degrees per update
+
+ELE_PID = PID(Kp=1.0, Ki=0.01, Kd=0.2, setpoint=0)
+ELE_PID.output_limits = (-5, 5)
 
 # GPIO setup
 GPIO.setmode(GPIO.BCM)
@@ -81,6 +90,13 @@ def start_mission(mav):
     test_msg = mav.recv_match(type='MISSION_CURRENT', blocking=False)
     print(test_msg, "Auto mission started!")
 
+def move_antenna(az_delta, el_delta):
+    global servo_azimuth_angle, servo_elevation_angle
+    servo_azimuth_angle = (servo_azimuth_angle + az_delta) % 360
+    servo_elevation_angle = max(0, min(90, servo_elevation_angle + el_delta))
+
+    print(f"Servo Azimuth Angle: {round(servo_azimuth_angle, 2)}° | Elevation Angle: {round(servo_elevation_angle, 2)}°")
+
 # Servo class
 class Servo:
     @staticmethod
@@ -102,9 +118,24 @@ def GPS_stream(mav):
             lon = msg.lon / 1e7
             alt = msg.alt / 1000
             print(f"Lat: {lat}, Lon: {lon}, Alt: {alt} m, Satellites: {msg.satellites_visible}")
-            azi = azi_elev_2.calculate_azimuth(LAT_GCS, LON_GCS, lat, lon)
-            ele = azi_elev_2.calculate_elevation(LAT_GCS, LON_GCS, lat, lon, alt)
-            Servo.set_angle(servo_azi, azi, servo_ele, ele)
+            #azi = azi_elev_2.calculate_azimuth(LAT_GCS, LON_GCS, lat, lon)
+            #ele = azi_elev_2.calculate_elevation(LAT_GCS, LON_GCS, lat, lon, alt)
+            #Servo.set_angle(servo_azi, azi, servo_ele, ele)
+
+            azimuth = azi_elev_2.calculate_azimuth(GCS_LAT, GCS_LON, lat, lon)
+            elevation = azi_elev_2.calculate_elevation(GCS_LAT, GCS_LON, lat, lon, GCS_ALT, alt)
+
+            # Set new setpoints for PID
+            AZI_PID.setpoint = azimuth
+            ELE_PID.setpoint = elevation
+
+            # Get PID output (how much to rotate)
+            azimuth_adjust = AZI_PID(servo_azimuth_angle)
+            elevation_adjust = ELE_PID(servo_elevation_angle)
+
+            move_antenna(azimuth_adjust, elevation_adjust)
+            time.sleep(0.1)
+
 
 # Entry point
 def main(mav):
