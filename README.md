@@ -71,14 +71,14 @@ mavproxy.py --master=/dev/ttyUSB0
 ------------------------------> PID Tunning <------------------------------------------------
 
 1. Tune Kp:
-    Increase Kp gradually (e.g., 0.5 → 1.0 → 2.0).
-    Watch the antenna's movement: it should become more responsive.
-    Stop increasing if it starts oscillating.
+   Increase Kp gradually (e.g., 0.5 → 1.0 → 2.0).
+   Watch the antenna's movement: it should become more responsive.
+   Stop increasing if it starts oscillating.
 2. Add Damping with Kd:
-    Add a small Kd (e.g., 0.1 → 0.2).
-    This smooths out fast changes and reduces overshoot.
-    If it becomes too slow again, reduce Kd.
-    Fix small long-term errors with Ki:
+   Add a small Kd (e.g., 0.1 → 0.2).
+   This smooths out fast changes and reduces overshoot.
+   If it becomes too slow again, reduce Kd.
+   Fix small long-term errors with Ki:
 3. Add a small Ki (e.g., 0.01).
-    Only increase if your tracker settles slightly off-target and stays there.
-    Too much Ki causes instability over time.
+   Only increase if your tracker settles slightly off-target and stays there.
+   Too much Ki causes instability over time.
