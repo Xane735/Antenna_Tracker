@@ -93,10 +93,10 @@ def GPS_stream(mav):
 # Entry point
 def main(mav):
     # Optional flight mode control
-    # loiter(mav)
-    # arm(mav)
-    # auto(mav)
-    # start_mission(mav)
+    #loiter(mav)
+    #arm(mav)
+    #auto(mav)
+    #start_mission(mav)
     GPS_stream(mav)
 
 main(mav)
