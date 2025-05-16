@@ -1,7 +1,7 @@
 from pymavlink import mavutil
 import math
 import time
-import azi_elev
+import azi_elev_2
 import RPi.GPIO as GPIO
 import subprocess
 
@@ -102,8 +102,8 @@ def GPS_stream(mav):
             lon = msg.lon / 1e7
             alt = msg.alt / 1000
             print(f"Lat: {lat}, Lon: {lon}, Alt: {alt} m, Satellites: {msg.satellites_visible}")
-            azi = azi_elev.calculate_azimuth(LAT_GCS, LON_GCS, lat, lon)
-            ele = azi_elev.calculate_elevation(LAT_GCS, LON_GCS, lat, lon, alt)
+            azi = azi_elev_2.calculate_azimuth(LAT_GCS, LON_GCS, lat, lon)
+            ele = azi_elev_2.calculate_elevation(LAT_GCS, LON_GCS, lat, lon, alt)
             Servo.set_angle(servo_azi, azi, servo_ele, ele)
 
 # Entry point

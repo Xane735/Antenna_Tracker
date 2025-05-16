@@ -1,7 +1,5 @@
 import math
 
-import math
-
 def calculate_azimuth(lat_gcs, lon_gcs, lat_uav, lon_uav):
     # Convert from degrees to radians
     lat_gcs = math.radians(lat_gcs)
