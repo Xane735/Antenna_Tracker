@@ -1,16 +1,17 @@
 import math
 
-def calculate_azimuth(GCS_LAT, GCS_LON, lat2, lon2):
-    GCS_LAT, GCS_LON = math.radians(GCS_LAT), math.radians(GCS_LON)
-    lat2, lon2 = math.radians(lat2), math.radians(lon2)
-    d_lon = lon2 - GCS_LON
-
-    y = math.sin(d_lon) * math.cos(lat2)
-    x = math.cos(GCS_LAT)*math.sin(lat2) - math.sin(GCS_LAT)*math.cos(lat2)*math.cos(d_lon)
-    azimuth = math.degrees(math.atan2(y, x))
-    return (azimuth + 360) % 360
-
 def calculate_elevation(lat_gcs, lon_gcs, lat_uav, lon_uav, alt_gcs, alt_uav):
+    """
+    Calculate elevation angle from GCS to UAV.
+    
+    Parameters:
+        lat_gcs, lon_gcs : float - Latitude and longitude of GCS in degrees
+        lat_uav, lon_uav : float - Latitude and longitude of UAV in degrees
+        alt_gcs, alt_uav : float - Altitudes of GCS and UAV in meters
+
+    Returns:
+        Elevation angle in degrees (0° = horizon, 90° = directly above)
+    """
     # Convert degrees to radians
     lat1 = math.radians(lat_gcs)
     lon1 = math.radians(lon_gcs)
