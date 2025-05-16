@@ -3,9 +3,26 @@ import math
 import time
 import azi_elev
 import RPi.GPIO as GPIO
+import subprocess
 
-lat_gcs = 13.026971
-lon_gcs = 77.563056
+# Start MAVProxy in the background
+print("Initializing Mavproxy")
+subprocess.Popen([
+    'mavproxy.py',
+    '--master=udp:0.0.0.0:14550',     # Or '--master=udp:0.0.0.0:14550' depending on your source; For pixhawk: '--master=/dev/ttyAMA0'
+    '--out=udp:192.168.1.193:14551',      # Or 'udp:127.0.0.1:14551'
+    '--baudrate', '57600'        # Adjust baudrate based on your telemetry device
+])
+
+# Give MAVProxy a moment to start
+time.sleep(5)
+print("Mavproxy Running...")
+
+# To know if Mavproxy is running: ps aux | grep mavproxy
+
+# Latitude and Longitude of the GCS/Antenna Tracker
+LAT_GCS = 13.026971
+LON_GCS = 77.563056
 
 # GPIO setup
 GPIO.setmode(GPIO.BCM)
@@ -26,8 +43,7 @@ servo_ele = GPIO.PWM(SERVO_ELE_PIN, 50)
 servo_azi.start(0)
 servo_ele.start(0)
 
-# Connect to MAVLink
-# Connect as a client (listen for broadcast packets)
+# Connect to MAVLink as Client
 # Use 'tcp:localhost:5762' in the connection string to connect to SITL
 # For Udp, 'udp:0.0.0.0:14551'
 
@@ -86,8 +102,8 @@ def GPS_stream(mav):
             lon = msg.lon / 1e7
             alt = msg.alt / 1000
             print(f"Lat: {lat}, Lon: {lon}, Alt: {alt} m, Satellites: {msg.satellites_visible}")
-            azi = azi_elev.calculate_azimuth(lat_gcs, lon_gcs, lat, lon)
-            ele = azi_elev.calculate_elevation(lat_gcs, lon_gcs, lat, lon, alt)
+            azi = azi_elev.calculate_azimuth(LAT_GCS, LON_GCS, lat, lon)
+            ele = azi_elev.calculate_elevation(LAT_GCS, LON_GCS, lat, lon, alt)
             Servo.set_angle(servo_azi, azi, servo_ele, ele)
 
 # Entry point
