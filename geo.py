@@ -92,8 +92,9 @@ def start_mission(mav):
 
 def move_antenna(az_delta, el_delta):
     global servo_azimuth_angle, servo_elevation_angle
-    servo_azimuth_angle = (servo_azimuth_angle + az_delta) % 360
-    servo_elevation_angle = max(0, min(90, servo_elevation_angle + el_delta))
+    servo_azi = (servo_azimuth_angle + az_delta) % 360
+    servo_ele = max(0, min(90, servo_elevation_angle + el_delta))
+    Servo.set_angle(servo_azi, azi, servo_ele, ele)
 
     print(f"Servo Azimuth Angle: {round(servo_azimuth_angle, 2)}° | Elevation Angle: {round(servo_elevation_angle, 2)}°")
 
@@ -108,6 +109,7 @@ class Servo:
         time.sleep(0.5)
         servo_azi.ChangeDutyCycle(0)
         servo_ele.ChangeDutyCycle(0)
+        
 
 # GPS data handling
 def GPS_stream(mav):
