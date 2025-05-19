@@ -4,8 +4,8 @@ from pymavlink import mavutil
 from simple_pid import PID
 
 # Constants
-GCS_LAT = 12.9716   # Replace with your actual GCS lat
-GCS_LON = 77.5946   # Replace with your actual GCS lon
+GCS_LAT = 13.0272307   # Replace with your actual GCS lat
+GCS_LON = 77.5630984   # Replace with your actual GCS lon
 GCS_ALT = 920       # Meters
 
 # Connect to MAVLink

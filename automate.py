@@ -59,3 +59,9 @@ def start_mission(mav):
     print(test_msg)
     print(start_msg)
     print("Auto mission started!")
+
+print("Starting Mission")
+loiter(mav)
+arm(mav)
+auto(mav)
+start_mission(mav)
