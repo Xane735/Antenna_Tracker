@@ -58,12 +58,28 @@ mav.mav.command_long_send(
     500000, 0, 0, 0, 0, 0
 )
 
-def move_antenna(az_delta, el_delta):
+def move_antenna(az_delta, el_delta, threshold=1.0):
     global servo_azimuth_angle, servo_elevation_angle
-    servo_azimuth_angle = (servo_azimuth_angle + az_delta) % 360
-    servo_elevation_angle = max(0, min(90, servo_elevation_angle + el_delta))
-    Servo.set_angle(servo_azimuth_angle, servo_elevation_angle)
-    print(f"Moved to Azimuth: {round(servo_azimuth_angle, 2)} ° | Elevation: {round(servo_elevation_angle, 2)} °")
+
+    # Calculate tentative new angles
+    new_az = (servo_azimuth_angle + az_delta) % 360
+    new_el = servo_elevation_angle + el_delta
+
+    # Clamp elevation between 0 and 180 (servo range)
+    new_el = max(0, min(180, new_el))
+
+    # Adjust for servo limits
+    adj_az, adj_el = azi_elev_3.adjust_angles_for_servo_limits(new_az, new_el)
+
+    # Only update servo if change exceeds threshold (to reduce jitter)
+    if abs(adj_az - servo_azimuth_angle) > threshold or abs(adj_el - servo_elevation_angle) > threshold:
+        servo_azimuth_angle = adj_az
+        servo_elevation_angle = adj_el
+        Servo.set_angle(servo_azimuth_angle, servo_elevation_angle)
+        print(f"Moved to Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
+    else:
+        # Change too small, skip update to reduce jitter
+        pass
 
 def GPS_stream():
     while True:
