@@ -1,3 +1,4 @@
+# Version 2 of azi_elev, Outdated Code
 import math
 
 def calculate_azimuth(GCS_LAT, GCS_LON, lat2, lon2):

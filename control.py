@@ -1,3 +1,5 @@
+# Version 2 of geo.py, do not use
+
 import math
 import time
 from pymavlink import mavutil
