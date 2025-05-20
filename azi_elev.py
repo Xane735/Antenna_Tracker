@@ -1,3 +1,5 @@
+# Version 1 of the code, Do not use this
+
 import math
 
 def calculate_azimuth(lat_gcs, lon_gcs, lat_uav, lon_uav):
