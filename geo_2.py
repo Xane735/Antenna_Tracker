@@ -1,7 +1,7 @@
 # Version 3 of geo.py, currently working code
 from pymavlink import mavutil
 import time
-import azi_elev_2
+import azi_elev_3
 import RPi.GPIO as GPIO
 from simple_pid import PID
 
@@ -75,8 +75,8 @@ def GPS_stream():
 
             print(f"Lat: {lat}, Lon: {lon}, Alt: {alt} m")
 
-            azimuth = azi_elev_2.calculate_azimuth(GCS_LAT, GCS_LON, lat, lon)
-            elevation = azi_elev_2.calculate_elevation(GCS_LAT, GCS_LON, lat, lon, GCS_ALT, alt)
+            azimuth = azi_elev_3.calculate_azimuth(GCS_LAT, GCS_LON, lat, lon)
+            elevation = azi_elev_3.calculate_elevation(GCS_LAT, GCS_LON, lat, lon, GCS_ALT, alt)
 
             AZI_PID.setpoint = azimuth
             ELE_PID.setpoint = elevation
