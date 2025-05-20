@@ -9,7 +9,7 @@ GCS_LON = 77.5630984   # Replace with your actual GCS lon
 GCS_ALT = 920       # Meters
 
 # Connect to MAVLink
-mav = mavutil.mavlink_connection('udp:localhost:14550')
+mav = mavutil.mavlink_connection('udp:0.0.0.0:14551')
 
 # PID Controllers (tune these values)
 az_pid = PID(Kp=1.0, Ki=0.01, Kd=0.2, setpoint=0)

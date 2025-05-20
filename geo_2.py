@@ -18,8 +18,8 @@ ELE_PID.output_limits = (-5, 5)
 
 # === GPIO Setup ===
 GPIO.setmode(GPIO.BCM)
-SERVO_AZI_PIN = 18
-SERVO_ELE_PIN = 13
+SERVO_AZI_PIN = 18 # GPIO18, Pin 12 , Azimuth servo
+SERVO_ELE_PIN = 13 # GPIO13, Pin 33 , Elevation servo
 GPIO.setup(SERVO_AZI_PIN, GPIO.OUT)
 GPIO.setup(SERVO_ELE_PIN, GPIO.OUT)
 
