@@ -1,36 +1,56 @@
-Instructions to Install Mavproxy onto Raspian OS:
+**Instructions to Install Mavproxy onto Raspian OS:**
 
-    sudo apt-get install python3-dev python3-opencv python3-wxgtk4.0 python3-pip python3-matplotlib python3-lxml python3-pygame
-    python3 -m pip install PyYAML mavproxy --user
-    echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+````bash
+ sudo apt-get install python3-dev python3-opencv python3-wxgtk4.0 python3-pip python3-matplotlib python3-lxml python3-pygame
+ python3 -m pip install PyYAML mavproxy --user
+ echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+ ```
 
 If you get a “permission denied” error message when connecting to serial devices, the user permissions may need to be changed:
 
-    sudo usermod -a -G dialout <username>
+```bash
+ sudo usermod -a -G dialout <username>
+````
 
-Install python virtual environment:
-sudo apt-get install python3-venv
+1. Install python virtual environment:
 
-Create a virtual environment (name it anything like mavproxy-env):
-python3 -m venv mavproxy-env
+   ```bash
+   sudo apt-get install python3-venv
+   ```
 
-Activate virtual environment:
-source mavproxy-env/bin/activate
+2. Create a virtual environment (name it anything like mavproxy-env):
 
-You should see your terminal change:
-(mavproxy-env) user@your-pi:~$
+   ```bash
+   python3 -m venv mavproxy-env
+   ```
 
-Now install the packages:
-pip install PyYAML mavproxy
+3. Activate virtual environment:
 
-Run mavproxy from inside the environment:
-mavproxy.py --master=/dev/ttyUSB0 --baudrate 57600
+   ```bash
+   source mavproxy-env/bin/activate
+   ```
 
-To exit the virtual environment:
-deactivate
+4. You should see your terminal change:
+   (mavproxy-env) user@your-pi:~$
 
-Enable access to global packaged (if required):
-python3 -m venv --system-site-packages mavproxy-env
+5. Now install the packages:
+
+   ```bash
+   pip install PyYAML mavproxy
+   ```
+
+6. Run mavproxy from inside the environment:
+
+   ```bash
+   mavproxy.py --master=/dev/ttyUSB0 --baudrate 57600
+   ```
+
+7. To exit the virtual environment:
+   ```linux
+   deactivate
+   ```
+   Enable access to global packaged (if required):
+   python3 -m venv --system-site-packages mavproxy-env
 
 To find all ports connected:
 ls /dev/ttyUSB\*

@@ -5,7 +5,7 @@ import time
 # Connect as a client (listen for broadcast packets)
 # Use 'tcp:localhost:5762' in the connection string to connect to SITL
 
-mav = mavutil.mavlink_connection('tcp:localhost:5762')
+mav = mavutil.mavlink_connection('udp:0.0.0.0:14550')
 
 print("Waiting for heartbeat...")
 mav.wait_heartbeat()

@@ -25,9 +25,11 @@ def calculate_azimuth(lat1, lon1, lat2, lon2):
     d_lon = lon2 - lon1
 
     y = math.sin(d_lon) * math.cos(lat2)
-    x = math.cos(lat1)*math.sin(lat2) - math.sin(lat1)*math.cos(lat2)*math.cos(d_lon)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(d_lon)
     azimuth = math.degrees(math.atan2(y, x))
-    return (azimuth + 360) % 360
+    azimuth = (azimuth + 360) % 360
+
+    return wrap_angle_0_to_180(azimuth)
 
 def calculate_elevation(lat1, lon1, lat2, lon2, alt1, alt2):
     R = 6371000  # Earth radius in meters
@@ -42,10 +44,11 @@ def calculate_elevation(lat1, lon1, lat2, lon2, alt1, alt2):
 
     d_alt = alt2 - alt1
     if ground_dist == 0:
-        return 90.0 if d_alt > 0 else 0.0
-    elev_angle = math.degrees(math.atan2(d_alt, ground_dist))
-    return round(elev_angle, 2)
+        elev_angle = 90.0 if d_alt > 0 else 0.0
+    else:
+        elev_angle = math.degrees(math.atan2(d_alt, ground_dist))
 
+    return wrap_angle_0_to_180(elev_angle)
 def get_uav_data():
     msg_gps = mav.recv_match(type='GLOBAL_POSITION_INT', blocking=True)
     msg_att = mav.recv_match(type='ATTITUDE', blocking=True)
@@ -67,6 +70,12 @@ def move_antenna(az_delta, el_delta):
     servo_elevation_angle = max(0, min(90, servo_elevation_angle + el_delta))
 
     print(f"Servo Azimuth Angle: {round(servo_azimuth_angle, 2)}° | Elevation Angle: {round(servo_elevation_angle, 2)}°")
+
+def wrap_angle_0_to_180(angle):
+    angle = angle % 360
+    if angle > 180:
+        angle = 360 - angle
+    return round(angle, 2)
 
 # Main loop
 def main():
