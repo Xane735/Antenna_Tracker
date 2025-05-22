@@ -11,10 +11,10 @@ GCS_LON = 77.5630563
 GCS_ALT = 1
 
 # === PID Controllers ===
-AZI_PID = PID(1.5, 0.01, 0.2)
+AZI_PID = PID(0.1, 0.01, 0.2)
 AZI_PID.output_limits = (-10, 10)
 
-ELE_PID = PID(1.0, 0.01, 0.2)
+ELE_PID = PID(0.1, 0.01, 0.2)
 ELE_PID.output_limits = (-5, 5)
 
 # === GPIO Setup ===
