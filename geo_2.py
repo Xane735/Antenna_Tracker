@@ -81,7 +81,7 @@ def move_antenna(az_delta, el_delta, threshold=1.0):
         # Change too small, skip update to reduce jitter
         pass
 
-    def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
+def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
         global servo_azimuth_angle, servo_elevation_angle
 
         target_az = target_az % 360
