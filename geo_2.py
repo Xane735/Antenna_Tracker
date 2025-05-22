@@ -81,32 +81,6 @@ def move_antenna(az_delta, el_delta, threshold=1.0):
         # Change too small, skip update to reduce jitter
         pass
 
-def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
-    global servo_azimuth_angle, servo_elevation_angle
-
-    # Normalize azimuth to [0, 360)
-    target_az = target_az % 360
-    target_el = max(0, min(180, target_el))  # Clamp elevation
-
-    # Step until current position matches target
-    while True:
-        delta_az = (target_az - servo_azimuth_angle + 540) % 360 - 180  # shortest direction
-        delta_el = target_el - servo_elevation_angle
-
-        # If both are within step_size, break
-        if abs(delta_az) <= step_size and abs(delta_el) <= step_size:
-            break
-
-        # Take a step toward target
-        step_az = step_size * (1 if delta_az > 0 else -1) if abs(delta_az) > step_size else delta_az
-        step_el = step_size * (1 if delta_el > 0 else -1) if abs(delta_el) > step_size else delta_el
-
-        # Move by step
-        move_antenna(step_az, step_el)
-
-        time.sleep(delay)  # Delay between steps
-
-
 def GPS_stream():
     while True:
         msg = mav.recv_match(type='GPS_RAW_INT', blocking=True)
@@ -126,7 +100,7 @@ def GPS_stream():
             azimuth_adjust = AZI_PID(servo_azimuth_angle)
             elevation_adjust = ELE_PID(servo_elevation_angle)
 
-            move_antenna_stepwise(azimuth_adjust, elevation_adjust, step_size =5.0, delay=0.05)
+            move_antenna(azimuth_adjust, elevation_adjust)
             time.sleep(0.1)
 
 def main():
