@@ -81,6 +81,26 @@ def move_antenna(az_delta, el_delta, threshold=1.0):
         # Change too small, skip update to reduce jitter
         pass
 
+    def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
+        global servo_azimuth_angle, servo_elevation_angle
+
+        target_az = target_az % 360
+        target_el = max(0, min(180, target_el))
+
+        while True:
+            delta_az = (target_az - servo_azimuth_angle + 540) % 360 - 180
+            delta_el = target_el - servo_elevation_angle
+
+            if abs(delta_az) <= step_size and abs(delta_el) <= step_size:
+                break
+
+            step_az = step_size * (1 if delta_az > 0 else -1) if abs(delta_az) > step_size else delta_az
+            step_el = step_size * (1 if delta_el > 0 else -1) if abs(delta_el) > step_size else delta_el
+
+            move_antenna(step_az, step_el)
+            time.sleep(delay)
+
+
 def GPS_stream():
     while True:
         msg = mav.recv_match(type='GPS_RAW_INT', blocking=True)
@@ -94,15 +114,13 @@ def GPS_stream():
             azimuth = azi_elev_3.calculate_azimuth(GCS_LAT, GCS_LON, lat, lon)
             elevation = azi_elev_3.calculate_elevation(GCS_LAT, GCS_LON, lat, lon, GCS_ALT, alt)
 
-            AZI_PID.setpoint = azimuth
-            ELE_PID.setpoint = elevation
+            # Compute the difference between current and target angles
+            azimuth_delta = azi_elev_3.wrap_angle(azimuth - servo_azimuth_angle)
+            elevation_delta = elevation - servo_elevation_angle
 
-            azimuth_adjust = AZI_PID(servo_azimuth_angle)
-            elevation_adjust = ELE_PID(servo_elevation_angle)
-
-            # Code to reduce jitters
-            if abs(azimuth_adjust) > 0.5 or abs(elevation_adjust) > 0.5:
-                move_antenna(azimuth_adjust, elevation_adjust)
+            # Move in steps toward the target
+            if abs(azimuth_delta) > 0.5 or abs(elevation_delta) > 0.5:
+                move_antenna_stepwise(azimuth, elevation, step_size=2.0, delay=0.05)
             time.sleep(0.1)
 
 def main():
