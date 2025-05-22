@@ -126,7 +126,7 @@ def GPS_stream():
             azimuth_adjust = AZI_PID(servo_azimuth_angle)
             elevation_adjust = ELE_PID(servo_elevation_angle)
 
-            move_antenna_stepwise(azimuth_adjust, elevation_adjust, step_size =5.0, delay=0.05)
+            move_antenna_stepwise(azimuth_adjust, elevation_adjust, step_size =3.0, delay=0.05)
             time.sleep(0.1)
 
 def main():
