@@ -100,7 +100,9 @@ def GPS_stream():
             azimuth_adjust = AZI_PID(servo_azimuth_angle)
             elevation_adjust = ELE_PID(servo_elevation_angle)
 
-            move_antenna(azimuth_adjust, elevation_adjust)
+            # Code to reduce jitters
+            if abs(azimuth_adjust) > 0.5 or abs(elevation_adjust) > 0.5:
+                move_antenna(azimuth_adjust, elevation_adjust)
             time.sleep(0.1)
 
 def main():
