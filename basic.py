@@ -51,7 +51,7 @@ mav.mav.command_long_send(
     500000, 0, 0, 0, 0, 0
 )
 
-def move_antenna(az_delta, el_delta, THRESH_HOLD=1.0):
+def move_antenna(az_delta, el_delta, THRESH_HOLD):
     global servo_azimuth_angle, servo_elevation_angle
 
     # Calculate new azimuth and elevation by adding delta movements
@@ -72,7 +72,8 @@ def move_antenna(az_delta, el_delta, THRESH_HOLD=1.0):
 
         print(f"Moved to Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
 
-def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
+
+def move_antenna_stepwise(target_az, target_el, step_size=2.0, delay=0.05):
     global servo_azimuth_angle, servo_elevation_angle
 
     # Normalize target angles
@@ -103,6 +104,50 @@ def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
         move_antenna(step_az, step_el)
 
         # Wait briefly before next step for smooth motion
+        time.sleep(delay)
+
+def track_antenna_to_target(raw_azi, raw_ele, step_size=2.0, delay=0.05, THRESH_HOLD=0.5):
+    global servo_azimuth_angle, servo_elevation_angle
+
+    # Adjust azimuth and elevation for servo-compatible behavior
+    if raw_azi > 180:
+        target_az = raw_azi - 180
+        target_el = 180 - raw_ele  # Flip elevation to look from behind
+    else:
+        target_az = raw_azi
+        target_el = raw_ele
+
+    # Clamp target angles within 0–180 servo range
+    target_az = max(0, min(180, target_az))
+    target_el = max(0, min(180, target_el))
+
+    # Stepwise movement
+    while True:
+        # Calculate smallest azimuth difference (in range -180 to +180)
+        delta_az = (target_az - servo_azimuth_angle + 540) % 360 - 180
+        delta_el = target_el - servo_elevation_angle
+
+        if abs(delta_az) <= step_size and abs(delta_el) <= step_size:
+            break
+
+        step_az = step_size * (1 if delta_az > 0 else -1) if abs(delta_az) > step_size else delta_az
+        step_el = step_size * (1 if delta_el > 0 else -1) if abs(delta_el) > step_size else delta_el
+
+        # Calculate new servo positions
+        new_az = servo_azimuth_angle + step_az
+        new_el = servo_elevation_angle + step_el
+
+        # Final clamping
+        new_az = max(0, min(180, new_az))
+        new_el = max(0, min(180, new_el))
+
+        # Only update if needed
+        if abs(new_az - servo_azimuth_angle) > THRESH_HOLD or abs(new_el - servo_elevation_angle) > THRESH_HOLD:
+            servo_azimuth_angle = new_az
+            servo_elevation_angle = new_el
+            Servo.set_angle(servo_azimuth_angle, servo_elevation_angle)
+            print(f"Moved to Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
+
         time.sleep(delay)
 
 def GPS_stream():
@@ -138,12 +183,11 @@ def GPS_stream():
             # Now you can move the servo using the corrected angles
             move_antenna_stepwise(azimuth, servo_elevation_angle, step_size=3.0, delay=0.05)
 
-            
-            
             time.sleep(0.1)
 
 def main():
     try:
+        Servo.set_angle(servo_azimuth_angle,servo_elevation_angle)
         GPS_stream()
     except KeyboardInterrupt:
         print("Stopping...")
