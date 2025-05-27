@@ -1,0 +1,155 @@
+from pymavlink import mavutil
+import time
+import azi_elev_3
+import RPi.GPIO as GPIO
+
+# === Constants ===
+GCS_LAT = 13.0269709
+GCS_LON = 77.5630563
+GCS_ALT = 1          # in meters
+THRESH_HOLD = 1.0
+
+# === GPIO Setup ===
+GPIO.setmode(GPIO.BCM)
+SERVO_AZI_PIN = 18  # GPIO18, Pin 12 , Azimuth servo
+SERVO_ELE_PIN = 13  # GPIO13, Pin 33 , Elevation servo
+GPIO.setup(SERVO_AZI_PIN, GPIO.OUT)
+GPIO.setup(SERVO_ELE_PIN, GPIO.OUT)
+
+servo_azi_pwm = GPIO.PWM(SERVO_AZI_PIN, 50)
+servo_ele_pwm = GPIO.PWM(SERVO_ELE_PIN, 50)
+servo_azi_pwm.start(0)
+servo_ele_pwm.start(0)
+
+# === Servo Tracking Angles ===
+#Sets starting Position
+servo_azimuth_angle = 90.0  # Facing East
+servo_elevation_angle = 45.0  # Mid elevation
+
+class Servo:
+    @staticmethod
+    def set_angle(azi_angle, ele_angle):
+        azi_duty = 2.5 + (azi_angle / 18)
+        ele_duty = 2.5 + (ele_angle / 18)
+        servo_azi_pwm.ChangeDutyCycle(azi_duty)
+        servo_ele_pwm.ChangeDutyCycle(ele_duty)
+        time.sleep(0.5)
+        servo_azi_pwm.ChangeDutyCycle(0)
+        servo_ele_pwm.ChangeDutyCycle(0)
+
+# === MAVLink Connection ===
+mav = mavutil.mavlink_connection('udp:0.0.0.0:14551')
+print("Waiting for heartbeat...")
+mav.wait_heartbeat()
+print(f"Connected to system (system ID: {mav.target_system}, component ID: {mav.target_component})")
+
+# === Message Interval Setting ===
+mav.mav.command_long_send(
+    mav.target_system, mav.target_component,
+    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+    0, mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
+    500000, 0, 0, 0, 0, 0
+)
+
+def move_antenna(az_delta, el_delta, THRESH_HOLD=1.0):
+    global servo_azimuth_angle, servo_elevation_angle
+
+    # Calculate new azimuth and elevation by adding delta movements
+    new_az = (servo_azimuth_angle + az_delta) % 360  # Wrap azimuth within 0-359°
+    new_el = max(0, min(180, servo_elevation_angle + el_delta))  # Clamp elevation between 0 and 180
+
+    # Adjust angles for mechanical or servo-specific constraints
+    adj_az, adj_el = azi_elev_3.adjust_angles_for_servo_limits(new_az, new_el)
+
+    # Moves servo only if it exceeds the set threshold
+    if abs(adj_az - servo_azimuth_angle) > THRESH_HOLD or abs(adj_el - servo_elevation_angle) > THRESH_HOLD:
+        
+        # Updates current position
+        servo_azimuth_angle = adj_az
+        servo_elevation_angle = adj_el
+
+        Servo.set_angle(servo_azimuth_angle, servo_elevation_angle)
+
+        print(f"Moved to Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
+
+def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
+    global servo_azimuth_angle, servo_elevation_angle
+
+    # Normalize target angles
+    target_az = target_az % 360  # Keep azimuth in [0, 360)
+    # If target azimuth is behind the antenna (>180°), flip angles for servo limits
+    if target_az > 180:
+        target_az = target_az - 180
+        target_el = 180 - target_el  # invert elevation
+
+    # Clamp final azimuth and elevation to servo range (0-180)
+    target_az = max(0, min(180, target_az))
+    target_el = max(0, min(180, target_el))  # Clamp elevation to servo range
+
+    while True:
+        # Compute shortest angle difference for azimuth (-180° to +180°)
+        delta_az = (target_az - servo_azimuth_angle + 540) % 360 - 180
+        delta_el = target_el - servo_elevation_angle
+
+        # If both deltas are within step size, stop stepping
+        if abs(delta_az) <= step_size and abs(delta_el) <= step_size:
+            break
+
+        # Calculate step direction and size for azimuth and elevation
+        step_az = step_size * (1 if delta_az > 0 else -1) if abs(delta_az) > step_size else delta_az
+        step_el = step_size * (1 if delta_el > 0 else -1) if abs(delta_el) > step_size else delta_el
+
+        # Move servos a small step toward the target
+        move_antenna(step_az, step_el)
+
+        # Wait briefly before next step for smooth motion
+        time.sleep(delay)
+
+def GPS_stream():
+    while True:
+        msg = mav.recv_match(type='GPS_RAW_INT', blocking=True)
+        if msg:
+            lat = msg.lat / 1e7
+            lon = msg.lon / 1e7
+            alt = msg.alt / 1000
+
+            print(f"Lat: {lat}, Lon: {lon}, Alt: {alt} m")
+
+            #azimuth = azi_elev_3.calculate_azimuth(GCS_LAT, GCS_LON, lat, lon)
+            #elevation = azi_elev_3.calculate_elevation(GCS_LAT, GCS_LON, lat, lon, GCS_ALT, alt)
+            #move_antenna_stepwise(azimuth, elevation, step_size=3.0, delay=0.05)
+            
+            # Compute original azimuth and elevation
+            azimuth = azi_elev_3.calculate_azimuth(GCS_LAT, GCS_LON, lat, lon)
+            elevation = azi_elev_3.calculate_elevation(GCS_LAT, GCS_LON, lat, lon, GCS_ALT, alt)
+
+            # Backtracking logic if drone is behind tracker
+            if azimuth > 180:
+                azimuth = azimuth - 180          # Flip azimuth to track from behind
+                elevation = 180 - elevation      # Invert elevation angle
+
+            # Convert elevation because 0° = down
+            servo_elevation_angle = 180 - elevation
+
+            # Clamp both angles
+            azimuth = max(0, min(180, azimuth))
+            servo_elevation_angle = max(0, min(180, servo_elevation_angle))
+
+            # Now you can move the servo using the corrected angles
+            move_antenna_stepwise(azimuth, servo_elevation_angle, step_size=3.0, delay=0.05)
+
+            
+            
+            time.sleep(0.1)
+
+def main():
+    try:
+        GPS_stream()
+    except KeyboardInterrupt:
+        print("Stopping...")
+    finally:
+        servo_azi_pwm.stop()
+        servo_ele_pwm.stop()
+        GPIO.cleanup()
+
+main()

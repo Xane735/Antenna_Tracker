@@ -1,44 +1,47 @@
-import math
+# Compute original azimuth and elevation
+azimuth = azi_elev_3.calculate_azimuth(GCS_LAT, GCS_LON, lat, lon)
+elevation = azi_elev_3.calculate_elevation(GCS_LAT, GCS_LON, lat, lon, GCS_ALT, alt)
 
-def calculate_elevation(lat_gcs, lon_gcs, lat_uav, lon_uav, alt_gcs, alt_uav):
-    """
-    Calculate elevation angle from GCS to UAV.
-    
-    Parameters:
-        lat_gcs, lon_gcs : float - Latitude and longitude of GCS in degrees
-        lat_uav, lon_uav : float - Latitude and longitude of UAV in degrees
-        alt_gcs, alt_uav : float - Altitudes of GCS and UAV in meters
+# Backtracking logic if drone is behind tracker
+if azimuth > 180:
+    azimuth = azimuth - 180          # Flip azimuth to track from behind
+    elevation = 180 - elevation      # Invert elevation angle
 
-    Returns:
-        Elevation angle in degrees (0° = horizon, 90° = directly above)
-    """
-    # Convert degrees to radians
-    lat1 = math.radians(lat_gcs)
-    lon1 = math.radians(lon_gcs)
-    lat2 = math.radians(lat_uav)
-    lon2 = math.radians(lon_uav)
+# Convert elevation because 0° = down
+servo_elevation_angle = 180 - elevation
 
-    # Earth radius
-    R = 6371000  # meters
+# Clamp both angles
+azimuth = max(0, min(180, azimuth))
+servo_elevation_angle = max(0, min(180, servo_elevation_angle))
 
-    # Haversine formula to calculate horizontal ground distance
-    d_lat = lat2 - lat1
-    d_lon = lon2 - lon1
+# Now you can move the servo using the corrected angles
+move_antenna_stepwise(azimuth, servo_elevation_angle, step_size=3.0, delay=0.05)
 
-    a = math.sin(d_lat / 2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(d_lon / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    ground_distance = R * c  # in meters
 
-    # Altitude difference
-    delta_h = alt_uav - alt_gcs
+def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
+    global servo_azimuth_angle, servo_elevation_angle
 
-    # Elevation angle (radians)
-    if ground_distance == 0 and delta_h > 0:
-        elevation_angle_deg = 90.0
-    elif ground_distance == 0 and delta_h <= 0:
-        elevation_angle_deg = 0.0
-    else:
-        elevation_angle_rad = math.atan2(delta_h, ground_distance)
-        elevation_angle_deg = math.degrees(elevation_angle_rad)
+    # Normalize azimuth to [0, 360)
+    target_az = target_az % 360
 
-    return round(elevation_angle_deg, 2)
+    # If target azimuth is behind the antenna (>180°), flip angles for servo limits
+    if target_az > 180:
+        target_az = target_az - 180
+        target_el = 180 - target_el  # invert elevation
+
+    # Clamp final azimuth and elevation to servo range (0-180)
+    target_az = max(0, min(180, target_az))
+    target_el = max(0, min(180, target_el))
+
+    while True:
+        delta_az = (target_az - servo_azimuth_angle + 540) % 360 - 180
+        delta_el = target_el - servo_elevation_angle
+
+        if abs(delta_az) <= step_size and abs(delta_el) <= step_size:
+            break
+
+        step_az = step_size * (1 if delta_az > 0 else -1) if abs(delta_az) > step_size else delta_az
+        step_el = step_size * (1 if delta_el > 0 else -1) if abs(delta_el) > step_size else delta_el
+
+        move_antenna(step_az, step_el)
+        time.sleep(delay)

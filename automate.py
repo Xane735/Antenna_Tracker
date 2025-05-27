@@ -5,7 +5,7 @@ import time
 # Connect as a client (listen for broadcast packets)
 # Use 'tcp:localhost:5762' in the connection string to connect to SITL
 
-mav = mavutil.mavlink_connection('udp:0.0.0.0:14550')
+mav = mavutil.mavlink_connection('tcp:localhost:5762', baud=57600)
 
 print("Waiting for heartbeat...")
 mav.wait_heartbeat()
@@ -26,6 +26,7 @@ def loiter(mav):
     msg = mav.recv_match(type='COMMAND_ACK', blocking=True)
     print(msg)
     print("Set to Loiter Mode")
+    time.sleep(5)
 
 def auto(mav):
     mav.mav.command_long_send(mav.target_system, mav.target_component,
@@ -34,6 +35,7 @@ def auto(mav):
     msg = mav.recv_match(type='COMMAND_ACK', blocking=True)
     print(msg)
     print("Set to Auto Mode")
+    time.sleep(5)
 
 def arm(mav):
     # Arm the drone
@@ -42,6 +44,7 @@ def arm(mav):
 
     msg = mav.recv_match(type='COMMAND_ACK', blocking=True)
     print(msg)
+    time.sleep(5)
 
 def start_mission(mav):
     # Start the mission by sending MAV_CMD_MISSION_START
@@ -54,6 +57,7 @@ def start_mission(mav):
 
     # Send the start mission command
     mav.mav.send(start_msg)
+    print("Mission Start message sent ")
 
     test_msg = mav.recv_match(type='MISSION_CURRENT', blocking=True)
     print(test_msg)
