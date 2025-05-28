@@ -1,7 +1,7 @@
 import RPi.GPIO as GPIO
 import time
 
-GPIO.setmode(GPIO.BCM)
+GPIO.setmode(GPIO.BCM) 
 
 SERVO1_PIN = 18  # Azimuth servo
 SERVO2_PIN = 13  # Elevation servo
