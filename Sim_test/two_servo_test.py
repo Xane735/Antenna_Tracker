@@ -1,3 +1,4 @@
+# Code for the smaller setup.
 import RPi.GPIO as GPIO
 import time
 
