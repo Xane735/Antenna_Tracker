@@ -1,16 +1,9 @@
 #Version 3 of azi_elev.py, currently working code
 import math
 
-'''
-def adjust_angles_for_servo_limits(azimuth, elevation):
-    if azimuth > 180:
-        azimuth = azimuth - 180
-        elevation = 180 - elevation
-    return azimuth, elevation
-'''
 def adjust_angles_for_servo_limits(azimuth, elevation):
     """
-    Maps azimuth to 0–180 for a limited servo,
+    Maps azimuth to 0-180 for a limited servo,
     flips elevation when azimuth goes beyond 180° to simulate rear tracking.
     """
     if azimuth > 180:
