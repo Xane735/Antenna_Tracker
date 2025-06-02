@@ -45,6 +45,8 @@ class Servo:
         servo_ele_pwm.ChangeDutyCycle(0)
 
 # === MAVLink Connection ===
+#For pixhawk: '--master=/dev/ttyAMA0'
+#For Simulation Test 'udp:0.0.0.0:14551'
 mav = mavutil.mavlink_connection('udp:0.0.0.0:14551')
 print("Waiting for heartbeat...")
 mav.wait_heartbeat()
