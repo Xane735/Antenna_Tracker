@@ -6,7 +6,7 @@ telemetry.wait_heartbeat()
 print("Got heartbeat from Pixhawk #1")
 
 # Connect to Pixhawk #2 via USB
-usb = mavutil.mavlink_connection('/dev/ttyACM0', baud=115200)
+usb = mavutil.mavlink_connection('/dev/ttyACM0', baud=57600)
 #usb = mavutil.mavlink_connection('/dev/ttyUSB0', baud=115200)
 usb.wait_heartbeat()
 print("Got heartbeat from Pixhawk #2")
