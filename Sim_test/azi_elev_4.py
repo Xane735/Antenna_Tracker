@@ -25,6 +25,11 @@ def calculate_elevation(lat1, lon1, lat2, lon2, alt1, alt2):
         return 90.0 if d_alt > 0 else 0.0
     return math.degrees(math.atan2(d_alt, horizontal_dist))
 
+def adjust_angles_for_servo_limits(azimuth, elevation):
+    azimuth = azimuth % 360
+    elevation = max(0, min(180, elevation))
+    return azimuth, elevation
+
 def test_servo_angle_logic():
     # Base location (your station)
     base_lat = 12.9716   
