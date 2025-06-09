@@ -27,10 +27,19 @@ servo_elevation_angle = 45.0  # Mid elevation
 class Servo:
     @staticmethod
     def set_angle(azi_angle, ele_angle):
-        azi_duty = 2.5 + (azi_angle / 18)
-        ele_duty = 2.5 + (ele_angle / 18)
+        # Gear ratio adjustment: 2:1 means servo angle = azimuth / 2
+        servo_azi_angle = azi_angle / 2.0
+
+        # Clamp to servo physical limits
+        servo_azi_angle = max(0, min(180, servo_azi_angle))
+        servo_ele_angle = max(0, min(180, ele_angle))
+
+        azi_duty = 2.5 + (servo_azi_angle / 18)
+        ele_duty = 2.5 + (servo_ele_angle / 18)
+
         servo_azi_pwm.ChangeDutyCycle(azi_duty)
         servo_ele_pwm.ChangeDutyCycle(ele_duty)
+
         time.sleep(0.5)
         servo_azi_pwm.ChangeDutyCycle(0)
         servo_ele_pwm.ChangeDutyCycle(0)
