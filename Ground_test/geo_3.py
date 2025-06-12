@@ -43,7 +43,6 @@ mav_drone.wait_heartbeat()
 mav_base.wait_heartbeat()
 print("Connected to both systems")
 
-
 def set_angle(azi_angle, ele_angle):
     # Convert to servo PWM-compatible angles (gear corrected)
     gear_corrected_azi = azi_angle / GEAR_RATIO

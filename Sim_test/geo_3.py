@@ -8,6 +8,10 @@ GCS_LAT = 13.0269709
 GCS_LON = 77.5630563
 GCS_ALT = 1
 
+GEAR_RATIO = 2.0 # 2:1 gear ratio => 1 input degree = 2 output degree
+
+STEP_SIZE = 1.0 # In degrees, Set the stepsize for the servos to move in
+
 # === GPIO Setup ===
 GPIO.setmode(GPIO.BCM)
 SERVO_AZI_PIN = 18  # GPIO18, Pin 12 , Azimuth servo
@@ -24,25 +28,21 @@ servo_ele_pwm.start(0)
 servo_azimuth_angle = 90.0  # Facing East
 servo_elevation_angle = 45.0  # Mid elevation
 
-class Servo:
-    @staticmethod
-    def set_angle(azi_angle, ele_angle):
-        # Gear ratio adjustment: 2:1 means servo angle = azimuth / 2
-        servo_azi_angle = azi_angle / 2.0
+def set_angle(azi_angle, ele_angle):
+    # Convert to servo PWM-compatible angles (gear corrected)
+    gear_corrected_azi = azi_angle / GEAR_RATIO
+    gear_corrected_ele = ele_angle / GEAR_RATIO
+    azi_duty = 2.5 + (gear_corrected_azi / 18)
+    ele_duty = 2.5 + (gear_corrected_ele / 18)
+    servo_azi_pwm.ChangeDutyCycle(azi_duty)
+    servo_ele_pwm.ChangeDutyCycle(ele_duty)
+    time.sleep(0.5)
+    servo_azi_pwm.ChangeDutyCycle(0)
+    servo_ele_pwm.ChangeDutyCycle(0)
 
-        # Clamp to servo physical limits
-        servo_azi_angle = max(0, min(180, servo_azi_angle))
-        servo_ele_angle = max(0, min(180, ele_angle))
-
-        azi_duty = 2.5 + (servo_azi_angle / 18)
-        ele_duty = 2.5 + (servo_ele_angle / 18)
-
-        servo_azi_pwm.ChangeDutyCycle(azi_duty)
-        servo_ele_pwm.ChangeDutyCycle(ele_duty)
-
-        time.sleep(0.5)
-        servo_azi_pwm.ChangeDutyCycle(0)
-        servo_ele_pwm.ChangeDutyCycle(0)
+# Setting Servo to an initial position
+set_angle(servo_azimuth_angle / GEAR_RATIO, servo_elevation_angle / GEAR_RATIO)
+time.sleep(1)
 
 # === MAVLink Connection ===
 mav = mavutil.mavlink_connection('udp:0.0.0.0:14551')
@@ -75,7 +75,7 @@ def move_antenna(az_delta, el_delta, threshold=1.0):
     if abs(adj_az - servo_azimuth_angle) > threshold or abs(adj_el - servo_elevation_angle) > threshold:
         servo_azimuth_angle = adj_az
         servo_elevation_angle = adj_el
-        Servo.set_angle(servo_azimuth_angle, servo_elevation_angle)
+        set_angle(servo_azimuth_angle, servo_elevation_angle)
         print(f"Moved to Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
 
 def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
