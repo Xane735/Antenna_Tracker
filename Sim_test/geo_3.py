@@ -2,11 +2,14 @@ from pymavlink import mavutil
 import time
 import azi_elev_4
 import RPi.GPIO as GPIO
+import matplotlib.pyplot as plt
 
 # === Constants ===
 GCS_LAT = 13.0269709
 GCS_LON = 77.5630563
 GCS_ALT = 1
+
+angle_log = []  # Global log list to store (timestamp, azimuth, elevation)
 
 GEAR_RATIO = 2.0 # 2:1 gear ratio => 1 input degree = 2 output degree
 
@@ -57,45 +60,76 @@ mav.mav.command_long_send(
     0, mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
     500000, 0, 0, 0, 0, 0
 )
-
-def move_antenna(az_delta, el_delta, threshold=1.0):
+def move_antenna_to_target(target_az, target_el, step_size=1.0, delay=0.05, threshold=1.0):
     global servo_azimuth_angle, servo_elevation_angle
 
-    # Calculate tentative new angles
-    new_az = (servo_azimuth_angle + az_delta) % 360
-    new_el = servo_elevation_angle + el_delta
-
-    # Clamp elevation between 0 and 180 (servo range)
-    new_el = max(0, min(180, new_el))
-
-    # Adjust for servo limits
-    adj_az, adj_el = azi_elev_4.adjust_angles_for_servo_limits(new_az, new_el)
-
-    # Only update servo if change exceeds threshold (to reduce jitter)
-    if abs(adj_az - servo_azimuth_angle) > threshold or abs(adj_el - servo_elevation_angle) > threshold:
-        servo_azimuth_angle = adj_az
-        servo_elevation_angle = adj_el
-        set_angle(servo_azimuth_angle, servo_elevation_angle)
-        print(f"Moved to Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
-
-def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
-    global servo_azimuth_angle, servo_elevation_angle
-
+    # Normalize target values
     target_az = target_az % 360
     target_el = max(0, min(180, target_el))
 
     while True:
-        delta_az = (target_az - servo_azimuth_angle + 540) % 360 - 180
+        # Compute deltas
+        delta_az = (target_az - servo_azimuth_angle + 540) % 360 - 180  # shortest angular path
         delta_el = target_el - servo_elevation_angle
 
+        # Break if within threshold
         if abs(delta_az) <= step_size and abs(delta_el) <= step_size:
             break
 
+        # Compute step increments
         step_az = step_size * (1 if delta_az > 0 else -1) if abs(delta_az) > step_size else delta_az
         step_el = step_size * (1 if delta_el > 0 else -1) if abs(delta_el) > step_size else delta_el
 
-        move_antenna(step_az, step_el)
+        # Tentative new angles
+        new_az = (servo_azimuth_angle + step_az) % 360
+        new_el = max(0, min(180, servo_elevation_angle + step_el))
+
+        # Adjust for servo limits
+        adj_az, adj_el = azi_elev_4.adjust_angles_for_servo_limits(new_az, new_el)
+
+        # Only move if change is significant
+        if abs(adj_az - servo_azimuth_angle) > threshold or abs(adj_el - servo_elevation_angle) > threshold:
+            servo_azimuth_angle = adj_az
+            servo_elevation_angle = adj_el
+            set_angle(servo_azimuth_angle, servo_elevation_angle)
+            log_angles(servo_azimuth_angle, servo_elevation_angle)
+            print(f"Moved to Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
+
         time.sleep(delay)
+
+    # Final move to precise target if necessary
+    final_az, final_el = azi_elev_4.adjust_angles_for_servo_limits(target_az, target_el)
+    if abs(final_az - servo_azimuth_angle) > threshold or abs(final_el - servo_elevation_angle) > threshold:
+        servo_azimuth_angle = final_az
+        servo_elevation_angle = final_el
+        set_angle(servo_azimuth_angle, servo_elevation_angle)
+        print(f"Final Position -> Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
+
+def plot_angle_log():
+    if not angle_log:
+        print("No data to plot.")
+        return
+
+    timestamps, azimuths, elevations = zip(*angle_log)
+
+    # Convert timestamps to relative time (seconds from start)
+    start_time = timestamps[0]
+    time_series = [t - start_time for t in timestamps]
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(time_series, azimuths, label='Azimuth (°)', color='blue')
+    plt.plot(time_series, elevations, label='Elevation (°)', color='green')
+    plt.xlabel("Time (s)")
+    plt.ylabel("Angle (degrees)")
+    plt.title("Antenna Angle Tracking Over Time")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+def log_angles(az, el):
+    timestamp = time.time()
+    angle_log.append((timestamp, az, el))
 
 def GPS_stream():
     while True:
@@ -109,8 +143,9 @@ def GPS_stream():
 
             azimuth = azi_elev_4.calculate_azimuth(GCS_LAT, GCS_LON, lat, lon)
             elevation = azi_elev_4.calculate_elevation(GCS_LAT, GCS_LON, lat, lon, GCS_ALT, alt)
+            
 
-            move_antenna_stepwise(azimuth, elevation, step_size=3.0, delay=0.05)
+            move_antenna_to_target(azimuth, elevation, step_size=3.0, delay=0.05)
             time.sleep(0.1)
 
 def main():
