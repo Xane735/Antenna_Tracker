@@ -126,6 +126,8 @@ def plot_angle_log():
     plt.grid(True)
     plt.tight_layout()
     plt.show()
+    plt.savefig("angle_plot.png")
+
 
 def log_angles(az, el):
     timestamp = time.time()
