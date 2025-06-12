@@ -78,35 +78,50 @@ def update_base_gps():
             print(f"[Base] Lat: {base_gps['lat']}, Lon: {base_gps['lon']}, Alt: {base_gps['alt']} m")
 
 # === Fixed move_antenna_stepwise ===
-def move_antenna_stepwise(target_az, target_el, step_size=1.0, delay=0.05):
+def move_antenna_to_target(target_az, target_el, step_size=1.0, delay=0.05, threshold=1.0):
     global servo_azimuth_angle, servo_elevation_angle
 
+    # Normalize target values
     target_az = target_az % 360
     target_el = max(0, min(180, target_el))
 
     while True:
-        delta_az = (target_az - servo_azimuth_angle + 540) % 360 - 180
+        # Compute deltas
+        delta_az = (target_az - servo_azimuth_angle + 540) % 360 - 180  # shortest angular path
         delta_el = target_el - servo_elevation_angle
 
+        # Break if within threshold
         if abs(delta_az) <= step_size and abs(delta_el) <= step_size:
             break
 
-        step_az = step_size if delta_az > 0 else -step_size
-        step_el = step_size if delta_el > 0 else -step_size
+        # Compute step increments
+        step_az = step_size * (1 if delta_az > 0 else -1) if abs(delta_az) > step_size else delta_az
+        step_el = step_size * (1 if delta_el > 0 else -1) if abs(delta_el) > step_size else delta_el
 
-        # Clamp to not overshoot
-        if abs(delta_az) < abs(step_az):
-            step_az = delta_az
-        if abs(delta_el) < abs(step_el):
-            step_el = delta_el
+        # Tentative new angles
+        new_az = (servo_azimuth_angle + step_az) % 360
+        new_el = max(0, min(180, servo_elevation_angle + step_el))
 
-        servo_azimuth_angle += step_az
-        servo_elevation_angle += step_el
+        # Adjust for servo limits
+        adj_az, adj_el = azi_elev_4.adjust_angles_for_servo_limits(new_az, new_el)
 
-        set_angle(servo_azimuth_angle, servo_elevation_angle)
-        print(f"Moved to Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
+        # Only move if change is significant
+        if abs(adj_az - servo_azimuth_angle) > threshold or abs(adj_el - servo_elevation_angle) > threshold:
+            servo_azimuth_angle = adj_az
+            servo_elevation_angle = adj_el
+            set_angle(servo_azimuth_angle, servo_elevation_angle)
+            print(f"Moved to Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
 
         time.sleep(delay)
+
+    # Final move to precise target if necessary
+    final_az, final_el = azi_elev_4.adjust_angles_for_servo_limits(target_az, target_el)
+    if abs(final_az - servo_azimuth_angle) > threshold or abs(final_el - servo_elevation_angle) > threshold:
+        servo_azimuth_angle = final_az
+        servo_elevation_angle = final_el
+        set_angle(servo_azimuth_angle, servo_elevation_angle)
+        print(f"Final Position -> Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
+
 
 def main():
     
