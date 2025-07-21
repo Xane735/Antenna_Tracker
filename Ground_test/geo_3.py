@@ -24,8 +24,8 @@ base_gps = {"lat": GCS_LAT, "lon": GCS_LON, "alt": GCS_ALT}
 
 # === GPIO Setup ===
 GPIO.setmode(GPIO.BCM)
-SERVO_AZI_PIN = 18
-SERVO_ELE_PIN = 13
+SERVO_AZI_PIN = 18 # Pin 12
+SERVO_ELE_PIN = 13 # Pin 33
 GPIO.setup(SERVO_AZI_PIN, GPIO.OUT)
 GPIO.setup(SERVO_ELE_PIN, GPIO.OUT)
 

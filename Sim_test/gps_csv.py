@@ -1,3 +1,5 @@
+#program to log GPS data into a CSV File
+
 from pymavlink import mavutil
 import csv
 import time

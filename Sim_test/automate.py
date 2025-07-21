@@ -1,3 +1,5 @@
+# Program to automate the Simulation on Mission Planner
+
 from pymavlink import mavutil
 import math
 import time

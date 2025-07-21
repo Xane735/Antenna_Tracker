@@ -1,0 +1,270 @@
+\documentclass[a4paper,20pt]{article} % Changed font size to 10pt
+\usepackage{latexsym}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{ragged2e}
+\usepackage[empty]{fullpage}
+\usepackage{wrapfig}
+\usepackage{tabularx}
+\usepackage{titlesec}
+\usepackage{geometry}
+\usepackage{marvosym}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{fontawesome5}
+\usepackage{multicol}
+\usepackage{graphicx}
+\usepackage{cfr-lm}
+\usepackage[T1]{fontenc}
+\setlength{\multicolsep}{0pt}
+\pagestyle{fancy}
+\fancyhf{} % clear all header and footer fields
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\geometry{left=1.2cm, top=1cm, right=1.2cm, bottom=1cm} % Adjusted margins
+
+\usepackage[most]{tcolorbox}
+\tcbset{
+    frame code={}
+    center title,
+    left=0pt,
+    right=0pt,
+    top=0pt,
+    bottom=0pt,
+    colback=gray!20,
+    colframe=white,
+    width=\dimexpr\textwidth\relax,
+    enlarge left by=-2mm,
+    boxsep=4pt,
+    arc=0pt,outer arc=0pt,
+}
+
+\urlstyle{same}
+
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+% Sections formatting
+\titleformat{\section}{
+  \vspace{-2pt}\scshape\raggedright\normalsize % Reduced space before section
+}{}{0em}{}[\color{black}\titlerule \vspace{-4pt}] % Reduced space after section
+
+% Custom commands
+\newcommand{\resumeItem}[2]{
+  \item{
+    \textbf{#1}{\hspace{0.5mm}#2 \vspace{-0.5mm}}
+  }
+}
+
+\newcommand{\resumePOR}[3]{
+\vspace{0.5mm}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+        \textbf{#1}\hspace{0.3mm}#2 & \textit{\small{#3}} 
+    \end{tabular*}
+    \vspace{-5mm}
+}
+
+\newcommand{\resumeSubheading}[4]{
+\vspace{0.5mm}\item
+    \begin{tabular*}{0.98\textwidth}[t]{l@{\extracolsep{\fill}}r}
+        \textbf{#1} & \textit{\small{#4}} \\
+        \textit{\small{#3}} &  \small{#2}\\
+    \end{tabular*}
+    \vspace{-2mm}
+}
+
+\newcommand{\resumeProject}[4]{
+\vspace{0.5mm}\item
+    \begin{tabular*}{0.98\textwidth}[t]{l@{\extracolsep{\fill}}r}
+        \textbf{#1} & \textit{\small{#3}} \\
+        \small{#2} \\
+        \small{#4}
+    \end{tabular*}
+    \vspace{-2mm}
+}
+
+\newcommand{\resumeSubItem}[2]{\resumeItem{#1}{#2}\vspace{-4pt}}
+
+\renewcommand{\labelitemi}{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=*,labelsep=0mm]}
+\newcommand{\resumeHeadingSkillStart}{\begin{itemize}[leftmargin=*,itemsep=1mm, rightmargin=2ex]}
+\newcommand{\resumeItemListStart}{\begin{justify}\begin{itemize}[leftmargin=3ex, rightmargin=2ex, noitemsep,labelsep=1.2mm,itemsep=0mm]\small}
+
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}\vspace{2mm}} % Reduced space after list
+\newcommand{\resumeHeadingSkillEnd}{\end{itemize}\vspace{2mm}} % Reduced space after list
+\newcommand{\resumeItemListEnd}{\end{itemize}\end{justify}\vspace{2mm}} % Reduced space after list
+\newcommand{\cvsection}[1]{%
+\vspace{1mm}
+\begin{tcolorbox}
+    \textbf{\large #1}
+\end{tcolorbox}
+    \vspace{-3mm}
+}
+
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}%
+\newcolumntype{R}{>{\raggedleft\arraybackslash}X}%
+\newcolumntype{C}{>{\centering\arraybackslash}X}%
+
+% CV Start
+\newcommand{\name}{Pranav Sharan S P} % Your Name
+\newcommand{\course}{Bachelor of Engineering, Electronics and Communication} % Your Program
+\newcommand{\roll}{} % Your Roll No.
+\newcommand{\phone}{9113985939} % Your Phone Number
+\newcommand{\emaila}{sppranav.sharan@gmail.com} %Email 1
+\newcommand{\emailb}{} %Email 2
+
+\begin{document}
+\fontfamily{cmr}\selectfont
+
+% Heading
+\parbox{2.35cm}{%
+  \raisebox{2mm}{%
+    \includegraphics[width=2cm,clip]{th-removebg-preview.png}%
+  }%
+  \vspace{1mm} % Adjust this space to control the distance between the image and the figure
+  \begin{figure}
+      \centering
+      \raisebox{-2mm}{%
+       % \includegraphics[width=0.5\linewidth]{logo-removebg-preview.png}%
+      }
+      %\caption{Enter Caption}
+      %\label{fig:enter-label}
+  \end{figure}
+}%
+\hspace{5mm} % Adjust this space to control the distance between the image and the text
+\parbox{\dimexpr\linewidth-2.8cm-5mm\relax}{ % Adjust the width calculation accordingly
+  \begin{tabularx}{\linewidth}{L r} \\
+    \textbf{\Large \name} & {\raisebox{0.0\height}{\footnotesize \faPhone}\ +91-\phone} \\
+    {Electronics and Communication} & \href{mailto:\emaila}{\raisebox{0.0\height}{\footnotesize \faEnvelope}\ {\emaila}} \\
+    {} &  \href{https://www.linkedin.com/in/pranav-sharan-s-p-x0a46n30e/}{\raisebox{0.0\height}{\footnotesize \faLinkedin}\ {LinkedIn}} \\
+    {} &  \href{https://github.com/Xane735}{\raisebox{0.0\height}{\footnotesize \faGithub}\ {Github}} \\
+    {} & \\
+  \end{tabularx}
+}
+
+\vspace{1mm} % Reduced space after heading
+
+% Education
+\section{\textbf{Education}}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {Ramaiah Institute of Technology}{2022 – 2026}
+      {Bachelor of Engineering, Electronics and Communications Engineering}{Bengaluru, Karnataka}
+    \resumeSubheading
+      {National Public School, Yeshwanthpur}{2020 – 2022}
+      {Physics, Chemistry, Math, Biology}{Bengaluru, Karnataka}
+  \resumeSubHeadingListEnd
+
+\vspace{-5mm} % Reduced space after section
+% Experience
+\section{\textbf{Experience}}
+\resumeSubHeadingListStart
+
+  \resumeSubheading
+    {Edhitha UAS}{Jan 2023 – Sep 2024}
+    {Avionics and Navigation Engineer and Business Development Lead}{Bengaluru, Karnataka}
+    \resumeItemListStart
+      \item{Part of the Aviation Electronics and Navigation Subsystem.}
+      \item{Responsible for research, testing, and integration of onboard electronics and communication systems on the drone.}
+      \item{SAFE CTRL: An Automated mechanism to complete Pre-flight checks on an Unmanned Aerial Vehicle.}
+      \item{Worked on monitoring vital parameters such as voltage draws, GPS connectivity, and current draw by the UAV.}
+      \item{Designed a custom thrust rig to bench test Li-ion and Li-Po batteries, BLDC motors, ESCs, and more.}
+    \resumeItemListEnd
+    \vspace{-0.5mm}
+    \href{https://www.edhitha.com}{www.edhitha.com}
+
+  \resumeSubheading
+    {Project - FlyCamp}{Dec 2024}
+    {Front End Developer}{Bengaluru, Karnataka}
+    \resumeItemListStart
+      \item{Designed the front-end application for the project.}
+      \item{Integrated the front-end with hardware systems.}
+    \resumeItemListEnd
+
+  \resumeSubheading
+    {Academic Projects}{}
+    {Circuit Design and Simulation}{RIT}
+    \resumeItemListStart
+      \item{Designed and simulated circuits using Cadence Virtuoso, Genus, Vivado—focused on logic circuits, analog systems, and digital design.}
+      \item{Validated performance through simulations, ensuring compliance with design specifications.}
+    \resumeItemListEnd
+
+    \resumeSubheading
+      {GNSS Denied Indoor Navigation}{}
+      {Research Project}{RIT}
+      \resumeItemListStart
+        \item{Developing a system using 3D mapping and BSF-SVM model to enable real-time indoor localization and navigation.}
+      \resumeItemListEnd
+
+\resumeSubHeadingListEnd
+
+\vspace{-3mm}
+
+% Achievements
+\section{\textbf{Achievements}}
+\resumeSubHeadingListStart
+
+  \resumeProject
+    {First Place - UI Design for Restaurant}
+    {Participated in a university-wide competition}
+    {RIT}
+    {Secured first place by designing a user-friendly UI for a restaurant.}
+
+  \resumeProject
+    {Fourth Place - Student Unmanned Aerial Systems 2024}
+    {Search and rescue UAV mission demonstration}
+    {Maryland, USA}
+    {Placed 4th in Mission Demonstration and 1st in Technical Review.}
+
+  \resumeProject
+    {Top 5 - College Level Hackathon 2024}
+    {Built a machine learning model for hospital management.}
+    {RIT}
+    {Ranked in the top 5 for designing an innovative ML solution.}
+
+\resumeSubHeadingListEnd
+
+\vspace{-4mm}
+
+% Organizations
+\section{\textbf{Organizations}}
+\resumeSubHeadingListStart
+
+  \resumeProject
+    {Belakoo Trust}{Summer Intern}
+    {Apr 2024 – May 2024}{Developed lesson plans for Grades 1 to 10 on the subject 'Applications of Mathematics'.}
+
+  \resumeProject
+    {Indian Institute of Science (IISc)}{Embedded Systems Intern}
+    {Apr 2025 – Jun 2025}{Currently working on an RSSI-based Antenna Tracker.}
+
+\resumeSubHeadingListEnd
+
+\vspace{-4mm}
+
+% Skills
+\section{\textbf{Skills}}
+\resumeHeadingSkillStart
+  \resumeSubItem{Languages:}{Python, C++, HTML, CSS, JS, C, Verilog}
+  \resumeSubItem{Frameworks:}{React, Flutter, Flask}
+  \resumeSubItem{Tools:}{MAVLink, MATLAB, Figma, Canva}
+  \resumeSubItem{Technologies:}{Hardware Integration, System Testing} 
+  \resumeSubItem{Soft Skills:}{Leadership, Creativity, Critical Thinking, Teamwork, Communication}
+\resumeHeadingSkillEnd
+
+\vspace{-4mm}
+
+% Interests
+\section{\textbf{Interests}}
+\resumeHeadingSkillStart
+  \resumeSubItem{}{ML-DL, Web Development, PCB Design, Embedded Systems, VLSI}
+\resumeHeadingSkillEnd
+
+\vspace{-2mm}
+
+\end{document}

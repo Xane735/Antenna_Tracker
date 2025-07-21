@@ -1,8 +1,8 @@
-# Version 4: Dual GPS integration for Antenna Tracker - FIXED
+# Version 5: Enhanced Dual GPS integration for Antenna Tracker with geopy
 import threading
 from pymavlink import mavutil
 import time
-import azi_elev_4
+import azi_elev_5
 import RPi.GPIO as GPIO
 import math
 
@@ -29,6 +29,7 @@ base_gps_lock = threading.Lock()
 # Debug flags
 DEBUG = True
 VERBOSE_GPS = True
+SHOW_TRACKING_INFO = True  # Show detailed tracking information
 
 def debug_print(message, level="INFO"):
     """Print debug messages with timestamp"""
@@ -100,6 +101,10 @@ mav_drone, mav_base = connect_mavlink()
 def set_angle(azi_angle, ele_angle):
     """Set servo angles with bounds checking and error handling"""
     try:
+        # Round angles to 2 decimal places for servo precision
+        azi_angle = round(azi_angle, 2)
+        ele_angle = round(ele_angle, 2)
+        
         # Bounds checking
         azi_angle = max(0, min(360, azi_angle))
         ele_angle = max(0, min(180, ele_angle))
@@ -120,8 +125,8 @@ def set_angle(azi_angle, ele_angle):
         servo_azi_pwm.ChangeDutyCycle(azi_duty)
         servo_ele_pwm.ChangeDutyCycle(ele_duty)
         
-        debug_print(f"Servo angles set - Azi: {azi_angle:.2f}° (duty: {azi_duty:.2f}%), "
-                   f"Ele: {ele_angle:.2f}° (duty: {ele_duty:.2f}%)")
+        debug_print(f"Servo angles set - Azi: {azi_angle}° (duty: {azi_duty:.2f}%), "
+                   f"Ele: {ele_angle}° (duty: {ele_duty:.2f}%)")
         
         time.sleep(0.5)
         servo_azi_pwm.ChangeDutyCycle(0)
@@ -150,9 +155,10 @@ def update_drone_gps():
             msg = mav_drone.recv_match(type='GPS_RAW_INT', blocking=True, timeout=5)
             if msg:
                 with drone_gps_lock:
-                    drone_gps["lat"] = msg.lat / 1e7
-                    drone_gps["lon"] = msg.lon / 1e7
-                    drone_gps["alt"] = msg.alt / 1000
+                    # Store with full precision (7 decimals) for accurate calculations
+                    drone_gps["lat"] = round(msg.lat / 1e7, 7)
+                    drone_gps["lon"] = round(msg.lon / 1e7, 7)
+                    drone_gps["alt"] = round(msg.alt / 1000, 2)
                 
                 if VERBOSE_GPS:
                     debug_print(f"[Drone GPS] Lat: {drone_gps['lat']:.7f}, "
@@ -184,9 +190,10 @@ def update_base_gps():
             msg = mav_base.recv_match(type='GPS_RAW_INT', blocking=True, timeout=5)
             if msg:
                 with base_gps_lock:
-                    base_gps["lat"] = msg.lat / 1e7
-                    base_gps["lon"] = msg.lon / 1e7
-                    base_gps["alt"] = msg.alt / 1000
+                    # Store with full precision (7 decimals) for accurate calculations
+                    base_gps["lat"] = round(msg.lat / 1e7, 7)
+                    base_gps["lon"] = round(msg.lon / 1e7, 7)
+                    base_gps["alt"] = round(msg.alt / 1000, 2)
                 
                 if VERBOSE_GPS:
                     debug_print(f"[Base GPS] Lat: {base_gps['lat']:.7f}, "
@@ -207,7 +214,11 @@ def move_antenna_to_target(target_az, target_el, step_size=1.0, delay=0.05, thre
     """Move antenna to target position with smooth motion"""
     global servo_azimuth_angle, servo_elevation_angle
     
-    debug_print(f"Moving antenna to target: Az={target_az:.2f}°, El={target_el:.2f}°")
+    # Round target angles to 2 decimal places for servo precision
+    target_az = round(target_az, 2)
+    target_el = round(target_el, 2)
+    
+    debug_print(f"Moving antenna to target: Az={target_az}°, El={target_el}°")
     
     # Normalize target values
     target_az = target_az % 360
@@ -221,8 +232,9 @@ def move_antenna_to_target(target_az, target_el, step_size=1.0, delay=0.05, thre
         delta_az = (target_az - servo_azimuth_angle + 540) % 360 - 180  # shortest angular path
         delta_el = target_el - servo_elevation_angle
         
-        debug_print(f"Step {step_count}: Current Az={servo_azimuth_angle:.2f}°, El={servo_elevation_angle:.2f}°, "
-                   f"Delta Az={delta_az:.2f}°, Delta El={delta_el:.2f}°", "DEBUG")
+        if step_count % 10 == 0:  # Reduce debug output frequency
+            debug_print(f"Step {step_count}: Current Az={servo_azimuth_angle}°, El={servo_elevation_angle}°, "
+                       f"Delta Az={delta_az:.2f}°, Delta El={delta_el:.2f}°", "DEBUG")
         
         # Break if within threshold
         if abs(delta_az) <= threshold and abs(delta_el) <= threshold:
@@ -237,19 +249,20 @@ def move_antenna_to_target(target_az, target_el, step_size=1.0, delay=0.05, thre
         new_az = (servo_azimuth_angle + step_az) % 360
         new_el = max(0, min(180, servo_elevation_angle + step_el))
         
-        # Adjust for servo limits if function exists
+        # Adjust for servo limits
         try:
-            adj_az, adj_el = azi_elev_4.adjust_angles_for_servo_limits(new_az, new_el)
+            adj_az, adj_el = azi_elev_5.adjust_angles_for_servo_limits(new_az, new_el)
         except (AttributeError, NameError):
-            debug_print("Warning: azi_elev_4.adjust_angles_for_servo_limits not available", "WARN")
-            adj_az, adj_el = new_az, new_el
+            debug_print("Warning: azi_elev_5.adjust_angles_for_servo_limits not available", "WARN")
+            adj_az, adj_el = round(new_az, 2), round(new_el, 2)
         
         # Only move if change is significant
         if abs(adj_az - servo_azimuth_angle) > 0.1 or abs(adj_el - servo_elevation_angle) > 0.1:
             servo_azimuth_angle = adj_az
             servo_elevation_angle = adj_el
             set_angle(servo_azimuth_angle, servo_elevation_angle)
-            debug_print(f"Moved to Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
+            if step_count % 10 == 0:  # Reduce output frequency
+                debug_print(f"Moved to Azimuth: {servo_azimuth_angle}° | Elevation: {servo_elevation_angle}°")
         
         time.sleep(delay)
         step_count += 1
@@ -259,7 +272,7 @@ def move_antenna_to_target(target_az, target_el, step_size=1.0, delay=0.05, thre
     
     # Final move to precise target if necessary
     try:
-        final_az, final_el = azi_elev_4.adjust_angles_for_servo_limits(target_az, target_el)
+        final_az, final_el = azi_elev_5.adjust_angles_for_servo_limits(target_az, target_el)
     except (AttributeError, NameError):
         final_az, final_el = target_az, target_el
     
@@ -267,37 +280,58 @@ def move_antenna_to_target(target_az, target_el, step_size=1.0, delay=0.05, thre
         servo_azimuth_angle = final_az
         servo_elevation_angle = final_el
         set_angle(servo_azimuth_angle, servo_elevation_angle)
-        debug_print(f"Final Position -> Azimuth: {servo_azimuth_angle:.2f}° | Elevation: {servo_elevation_angle:.2f}°")
+        debug_print(f"Final Position -> Azimuth: {servo_azimuth_angle}° | Elevation: {servo_elevation_angle}°")
 
 def calculate_tracking_angles():
-    """Calculate azimuth and elevation for tracking"""
+    """Calculate azimuth and elevation for tracking using geopy"""
     with drone_gps_lock, base_gps_lock:
         if not all([drone_gps["lat"], drone_gps["lon"], drone_gps["alt"]]):
             debug_print("Drone GPS data not available", "WARN")
-            return None, None
+            return None, None, None
         
         try:
-            # Calculate azimuth and elevation using azi_elev_4 module
-            azimuth, elevation = azi_elev_4.calculate_azimuth_elevation(
+            # Get comprehensive tracking information
+            tracking_info = azi_elev_5.get_tracking_info(
                 base_gps["lat"], base_gps["lon"], base_gps["alt"],
                 drone_gps["lat"], drone_gps["lon"], drone_gps["alt"]
             )
-            return azimuth, elevation
+            
+            if tracking_info:
+                if SHOW_TRACKING_INFO:
+                    debug_print(f"Tracking Info - Distance: {tracking_info['horizontal_distance']}m, "
+                               f"Slant: {tracking_info['slant_range']}m, "
+                               f"Alt Diff: {tracking_info['altitude_difference']}m")
+                
+                return (tracking_info['adjusted_azimuth'], 
+                       tracking_info['adjusted_elevation'], 
+                       tracking_info)
+            else:
+                return None, None, None
+                
         except Exception as e:
             debug_print(f"Error calculating tracking angles: {e}", "ERROR")
-            return None, None
+            return None, None, None
 
 def tracking_loop():
-    """Main tracking loop"""
-    debug_print("Starting tracking loop")
+    """Main tracking loop with enhanced geopy calculations"""
+    debug_print("Starting enhanced tracking loop with geopy")
     
     while True:
         try:
-            azimuth, elevation = calculate_tracking_angles()
+            azimuth, elevation, tracking_info = calculate_tracking_angles()
             
             if azimuth is not None and elevation is not None:
-                debug_print(f"Calculated tracking angles: Az={azimuth:.2f}°, El={elevation:.2f}°")
-                move_antenna_to_target(azimuth, elevation, STEP_SIZE)
+                debug_print(f"Calculated tracking angles: Az={azimuth}°, El={elevation}°")
+                
+                # Only move if there's a significant change to reduce servo wear
+                current_delta_az = abs(azimuth - servo_azimuth_angle)
+                current_delta_el = abs(elevation - servo_elevation_angle)
+                
+                if current_delta_az > 0.5 or current_delta_el > 0.5:  # 0.5 degree threshold
+                    move_antenna_to_target(azimuth, elevation, STEP_SIZE)
+                else:
+                    debug_print("Target within movement threshold, no servo adjustment needed")
+                    
             else:
                 debug_print("Cannot calculate tracking angles, waiting...", "WARN")
             
@@ -322,7 +356,7 @@ def cleanup():
         debug_print(f"Error during cleanup: {e}", "ERROR")
 
 def main():
-    debug_print("Starting Antenna Tracker System")
+    debug_print("Starting Enhanced Antenna Tracker System with geopy")
     
     try:
         # Start GPS update threads

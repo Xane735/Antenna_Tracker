@@ -81,9 +81,9 @@ def connect_mavlink():
     
     try:
         mav_base = mavutil.mavlink_connection('/dev/ttyUSB0', baud=57600)
-        debug_print("Base station connection established on /dev/ttyUSB0")
+        debug_print("Tracker connection established on /dev/ttyUSB0")
     except Exception as e:
-        debug_print(f"Failed to connect to base station: {e}", "ERROR")
+        debug_print(f"Failed to connect to Tracker: {e}", "ERROR")
         return mav_drone, None
     
     debug_print("Waiting for heartbeats...")
@@ -98,11 +98,11 @@ def connect_mavlink():
         return None, None
     
     try:
-        debug_print("Waiting for base station heartbeat...")
+        debug_print("Waiting for tracker heartbeat...")
         mav_base.wait_heartbeat(timeout=CONNECTION_TIMEOUT)
-        debug_print("Base station heartbeat received")
+        debug_print("Tracker heartbeat received")
     except Exception as e:
-        debug_print(f"Base station heartbeat timeout: {e}", "ERROR")
+        debug_print(f"Tracker heartbeat timeout: {e}", "ERROR")
         return mav_drone, None
     
     debug_print("Connected to both systems successfully")
@@ -112,7 +112,6 @@ def connect_mavlink():
 mav_drone, mav_base = connect_mavlink()
 
 def set_angle(azi_angle, ele_angle):
-    """Set servo angles with bounds checking and error handling"""
     try:
         # Bounds checking
         azi_angle = max(0, min(360, azi_angle))
