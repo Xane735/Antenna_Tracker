@@ -14,7 +14,7 @@ import numpy as np
 
 # === Config ===
 DEBUG = True
-USE_SMOOTH_MOVEMENT = True
+USE_SMOOTH_MOVEMENT = False
 LOG_TO_CSV = True
 GENERATE_RADAR_PLOT = True
 
@@ -68,31 +68,10 @@ def set_angle(logical_az, elevation):
 def move_to(az_target, el_target, step=STEP_SIZE, delay=0.05):
     global servo_logical_azimuth_angle, servo_elevation_angle
 
-    if not USE_SMOOTH_MOVEMENT:
-        servo_logical_azimuth_angle = az_target
-        servo_elevation_angle = el_target
-        adj_az, adj_el = tracker.adjust_angles_for_servo_limits(az_target, el_target)
-        set_angle(adj_az, adj_el)
-        return
-
-    for _ in range(500):
-        delta_az = (az_target - servo_logical_azimuth_angle + 540) % 360 - 180
-        delta_el = el_target - servo_elevation_angle
-
-        if abs(delta_az) <= 1 and abs(delta_el) <= 1:
-            break
-
-        step_az = step if delta_az > 0 else -step if abs(delta_az) > step else delta_az
-        step_el = step if delta_el > 0 else -step if abs(delta_el) > step else delta_el
-
-        servo_logical_azimuth_angle = (servo_logical_azimuth_angle + step_az) % 360
-        servo_elevation_angle = max(0, min(180, servo_elevation_angle + step_el))
-
-        adj_az, adj_el = tracker.adjust_angles_for_servo_limits(
-            servo_logical_azimuth_angle, servo_elevation_angle)
-
-        set_angle(adj_az, adj_el)
-        time.sleep(delay)
+    servo_logical_azimuth_angle = az_target
+    servo_elevation_angle = el_target
+    adj_az, adj_el = tracker.adjust_angles_for_servo_limits(az_target, el_target)
+    set_angle(adj_az, adj_el)
 
 def log_to_csv(info):
     if not LOG_TO_CSV:
@@ -110,14 +89,20 @@ def log_to_csv(info):
         log_file.flush()
 
 def tracking_loop():
+    waited = 0
     while True:
         try:
             with drone_gps_lock:
                 lat, lon, alt = drone_gps["lat"], drone_gps["lon"], drone_gps["alt"]
             if not all([lat, lon, alt]):
-                debug("Drone GPS not ready")
+                if waited == 0:
+                    debug("Waiting for GPS fix before starting tracking...")
+                waited += 1
                 time.sleep(1)
                 continue
+
+            if waited > 0:
+                debug("GPS fix acquired. Tracking begins.")
 
             info = tracker.get_tracking_info(BASE_LAT, BASE_LON, BASE_ALT, lat, lon, alt)
             log_to_csv(info)
@@ -143,26 +128,6 @@ def update_drone_gps(mav):
             debug(f"GPS error: {e}")
             time.sleep(1)
 
-def generate_radar_plot():
-    try:
-        azimuths = []
-        with open("antenna_tracking_log.csv") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                azimuths.append(float(row["azimuth"]))
-        theta = np.deg2rad(azimuths)
-        r = np.ones_like(theta)
-        fig = plt.figure(figsize=(6, 6))
-        ax = fig.add_subplot(111, polar=True)
-        ax.set_theta_zero_location('N')
-        ax.set_theta_direction(-1)
-        ax.plot(theta, r, 'b.-')
-        ax.set_title("Azimuth Radar Plot")
-        fig.savefig("azimuth_radar_plot.png")
-        debug("Radar plot saved to azimuth_radar_plot.png")
-    except Exception as e:
-        debug(f"Plot error: {e}")
-
 def cleanup():
     pwm_azi.stop()
     pwm_ele.stop()
@@ -172,6 +137,27 @@ def cleanup():
     if GENERATE_RADAR_PLOT:
         generate_radar_plot()
     debug("Cleanup done.")
+
+def generate_radar_plot():
+    try:
+        angles = []
+        with open("antenna_tracking_log.csv", "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                angles.append(float(row["azimuth"]))
+        if not angles:
+            debug("No azimuth data to plot")
+            return
+        radians = np.radians(angles)
+        fig = plt.figure()
+        ax = fig.add_subplot(111, polar=True)
+        ax.set_theta_direction(-1)
+        ax.set_theta_zero_location("N")
+        ax.hist(radians, bins=36)
+        plt.savefig("azimuth_radar_plot.png")
+        debug("Radar plot saved to azimuth_radar_plot.png")
+    except Exception as e:
+        debug(f"Radar plot error: {e}")
 
 def main():
     global pwm_azi, pwm_ele
