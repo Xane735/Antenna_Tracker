@@ -1,0 +1,46 @@
+import csv
+import azi_elev_5 as tracker
+
+INPUT_CSV = "Test_bench.csv"
+OUTPUT_CSV = "gps_with_angles.csv"
+
+def process_csv(input_path, output_path):
+    with open(input_path, "r") as infile, open(output_path, "w", newline="") as outfile:
+        reader = csv.DictReader(infile)
+        fieldnames = reader.fieldnames + [
+            "azimuth", "elevation",
+            "adjusted_azimuth", "adjusted_elevation",
+            "horizontal_distance", "slant_range", "altitude_difference", "bearing"
+        ]
+        writer = csv.DictWriter(outfile, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for i, row in enumerate(reader):
+            try:
+                base_lat = float(row["base_lat"])
+                base_lon = float(row["base_lon"])
+                base_alt = float(row["base_alt"])
+                drone_lat = float(row["drone_lat"])
+                drone_lon = float(row["drone_lon"])
+                drone_alt = float(row["drone_alt"])
+
+                info = tracker.get_tracking_info(
+                    base_lat, base_lon, base_alt,
+                    drone_lat, drone_lon, drone_alt
+                )
+
+                if info:
+                    row.update(info)
+                else:
+                    row.update({key: None for key in fieldnames if key not in row})
+
+                writer.writerow(row)
+
+            except Exception as e:
+                print(f"Row {i+1}: Error - {e}")
+                continue
+
+    print(f"\n✅ Done. Output saved to '{output_path}'")
+
+if __name__ == "__main__":
+    process_csv(INPUT_CSV, OUTPUT_CSV)
