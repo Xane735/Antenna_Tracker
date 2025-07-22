@@ -1,5 +1,5 @@
 # Antenna Tracker (Simulation-Ready Version)
-#WORRKSSSS!!!!
+# WORRKSSSS!!!!
 
 import threading
 import time
