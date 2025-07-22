@@ -40,9 +40,9 @@ servo_elevation_angle = 45.0        # 0–90° elevation
 # === GPS State ===
 drone_gps = {"lat": None, "lon": None, "alt": None}
 base_gps = {
-    "lat": 13.0272228677567,  # TODO: Add base latitude here (e.g., 12.9716)
-    "lon": 77.5631037354469 ,  # TODO: Add base longitude here (e.g., 77.5946)
-    "alt": 931.17   # TODO: Add base altitude in meters (e.g., 900.0)
+    "lat": 13.0276844,  # TODO: Add base latitude here (e.g., 12.9716)
+    "lon": 77.5631084 ,  # TODO: Add base longitude here (e.g., 77.5946)
+    "alt": 931.13   # TODO: Add base altitude in meters (e.g., 900.0)
 }
 drone_gps_lock = threading.Lock()
 
@@ -100,21 +100,24 @@ mav_drone = connect_mavlink()
 # === Servo Control ===
 def set_angle(logical_az, elevation):
     try:
-        physical_az = logical_az / GEAR_RATIO
-        physical_el = elevation / GEAR_RATIO
+        # Calculate physical servo angle based on gear ratio
+        servo_az = logical_az / GEAR_RATIO
+        servo_el = elevation / GEAR_RATIO
 
-        duty_az = 2.5 + (physical_az * 10.0 / 180.0)
-        duty_el = 2.5 + (physical_el * 10.0 / 180.0)
+        # Clamp servo angle to realistic range supported by the HiTec D645MW
+        servo_az = max(0, min(120, servo_az))
+        servo_el = max(0, min(120, servo_el))
 
-        duty_az = max(2.5, min(12.5, duty_az))
-        duty_el = max(2.5, min(12.5, duty_el))
+        # Convert angle to duty cycle: 5% (0°) to 10% (120°)
+        duty_az = 5 + (servo_az * 5.0 / 120.0)
+        duty_el = 5 + (servo_el * 5.0 / 120.0)
 
         debug(f"Input angles => Logical Az: {logical_az:.2f}°, Elevation: {elevation:.2f}°")
-        debug(f"Physical servo angles => Az: {physical_az:.2f}°, El: {physical_el:.2f}°")
+        debug(f"Servo input angles => Az: {servo_az:.2f}°, El: {servo_el:.2f}°")
+        debug(f"Duty cycles => Az: {duty_az:.2f}%, El: {duty_el:.2f}%")
 
         pwm_azi.ChangeDutyCycle(duty_az)
         pwm_ele.ChangeDutyCycle(duty_el)
-        debug(f"Set angles, Az: {logical_az:.2f}°, El: {elevation:.2f}°")
 
         time.sleep(0.5)
         pwm_azi.ChangeDutyCycle(0)
@@ -152,7 +155,7 @@ def move_to(az_target, el_target, step=STEP_SIZE, delay=0.05):
         servo_logical_azimuth_angle = az_target
         servo_elevation_angle = el_target
         adj_az, adj_el = tracker.adjust_angles_for_servo_limits(az_target, el_target)
-        set_angle(adj_az, adj_el)
+        set_angle(math.ceil(adj_az), math.ceil(adj_el))
         move_print(f"Snapped → Az: {adj_az:.2f}°, El: {adj_el:.2f}°")
         return
 

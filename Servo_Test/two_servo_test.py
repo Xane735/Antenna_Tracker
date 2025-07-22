@@ -1,52 +1,46 @@
-# Code for the smaller setup.
-
 import RPi.GPIO as GPIO
 import time
 
-# Setup
+# === GPIO Setup ===
 GPIO.setmode(GPIO.BCM)
+AZI_PIN = 18
+ELE_PIN = 13
 
-# Servo pins
-SERVO1_PIN = 18  # GPIO18, Pin 12 , Azimuth servo
-SERVO2_PIN = 13  # GPIO13, Pin 33 , Elevation servo
+GPIO.setup(AZI_PIN, GPIO.OUT)
+GPIO.setup(ELE_PIN, GPIO.OUT)
 
-# Setup pins as output
-GPIO.setup(SERVO1_PIN, GPIO.OUT)
-GPIO.setup(SERVO2_PIN, GPIO.OUT)
+pwm_azi = GPIO.PWM(AZI_PIN, 50)  # 50 Hz for standard servo
+pwm_ele = GPIO.PWM(ELE_PIN, 50)
 
-# Create PWM instances at 50Hz
-servo1 = GPIO.PWM(SERVO1_PIN, 50)
-servo2 = GPIO.PWM(SERVO2_PIN, 50)
+pwm_azi.start(0)
+pwm_ele.start(0)
 
-# Start PWM with neutral duty cycle (7.5%)
-servo1.start(0)
-servo2.start(0)
-
-def set_angle(servo, angle):
-    duty = 2.5 + (angle / 18)  # Map 0–180° to 2.5–12.5% duty
-    servo.ChangeDutyCycle(duty)
+# === Helper Function ===
+def set_servo_angle(pwm, angle):
+    # Clamp angle between 0–120° to match servo capability
+    angle = max(0, min(120, angle))
+    duty = 5 + (angle * 5 / 120.0)  # Scale to 5–10% duty for 0–120°
+    pwm.ChangeDutyCycle(duty)
     time.sleep(0.5)
-    servo.ChangeDutyCycle(0)  # Stop signal to prevent jitter
+    pwm.ChangeDutyCycle(0)
 
 try:
+    print("Sweeping Azimuth and Elevation servos...")
     while True:
-        print("Moving both servos to 0°")
-        set_angle(servo1, 0)
-        set_angle(servo2, 0)
-        time.sleep(1)
-
-        print("Moving both servos to 90°")
-        set_angle(servo1, 90)
-        set_angle(servo2, 90)
-        time.sleep(1)
-
-        print("Moving both servos to 180°")
-        set_angle(servo1, 180)
-        set_angle(servo2, 180)
-        time.sleep(1)
-
+        for angle in range(0, 181, 30):
+            print(f"Moving to {angle}°")
+            set_servo_angle(pwm_azi, angle)
+            set_servo_angle(pwm_ele, angle)
+            time.sleep(0.5)
+        for angle in range(180, -1, -30):
+            print(f"Moving to {angle}°")
+            set_servo_angle(pwm_azi, angle)
+            set_servo_angle(pwm_ele, angle)
+            time.sleep(0.5)
 except KeyboardInterrupt:
-    print("Stopping...")
-    servo1.stop()
-    servo2.stop()
+    print("Exiting...")
+
+finally:
+    pwm_azi.stop()
+    pwm_ele.stop()
     GPIO.cleanup()
