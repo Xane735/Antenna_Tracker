@@ -109,6 +109,9 @@ def set_angle(logical_az, elevation):
         duty_az = max(2.5, min(12.5, duty_az))
         duty_el = max(2.5, min(12.5, duty_el))
 
+        debug(f"Input angles => Logical Az: {logical_az:.2f}°, Elevation: {elevation:.2f}°")
+        debug(f"Physical servo angles => Az: {physical_az:.2f}°, El: {physical_el:.2f}°")
+
         pwm_azi.ChangeDutyCycle(duty_az)
         pwm_ele.ChangeDutyCycle(duty_el)
         debug(f"Set angles, Az: {logical_az:.2f}°, El: {elevation:.2f}°")

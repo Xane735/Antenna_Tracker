@@ -39,9 +39,9 @@ servo_elevation_angle = 45.0        # 0–90° elevation
 # === GPS State ===
 drone_gps = {"lat": None, "lon": None, "alt": None}
 base_gps = {
-    "lat": 13.0272228677567,  # TODO: Add base latitude here (e.g., 12.9716)
-    "lon": 77.5631037354469 ,  # TODO: Add base longitude here (e.g., 77.5946)
-    "alt": 931.17   # TODO: Add base altitude in meters (e.g., 900.0)
+    "lat": None,  # TODO: Add base latitude here (e.g., 12.9716)
+    "lon": None,  # TODO: Add base longitude here (e.g., 77.5946)
+    "alt": None   # TODO: Add base altitude in meters (e.g., 900.0)
 }
 drone_gps_lock = threading.Lock()
 
@@ -108,9 +108,11 @@ def set_angle(logical_az, elevation):
         duty_az = max(2.5, min(12.5, duty_az))
         duty_el = max(2.5, min(12.5, duty_el))
 
+        debug(f"Input angles => Logical Az: {logical_az:.2f}°, Elevation: {elevation:.2f}°")
+        debug(f"Physical servo angles => Az: {physical_az:.2f}°, El: {physical_el:.2f}°")
+
         pwm_azi.ChangeDutyCycle(duty_az)
         pwm_ele.ChangeDutyCycle(duty_el)
-        debug(f"Set angles, Az: {logical_az:.2f}°, El: {elevation:.2f}°")
 
         time.sleep(0.5)
         pwm_azi.ChangeDutyCycle(0)
