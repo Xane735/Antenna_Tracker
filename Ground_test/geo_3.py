@@ -137,3 +137,6 @@ def main():
         GPIO.cleanup()
 
 main()
+ "lat": 13.0272228677567,  # TODO: Add base latitude here (e.g., 12.9716)
+    "lon": 77.5631037354469 ,  # TODO: Add base longitude here (e.g., 77.5946)
+    "alt": 931.17   # TODO: Add base altitude in meters (e.g., 900.0)
