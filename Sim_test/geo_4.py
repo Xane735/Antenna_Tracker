@@ -22,6 +22,7 @@ GPS_TIMEOUT = 5
 TRACKING_UPDATE_RATE = 0.5
 GEAR_RATIO = 2.0
 STEP_SIZE = 1.0
+MIN_DEGREE_DELTA = 5.0  # Minimum change in angle to trigger servo movement
 
 # === Logging Setup ===
 if LOG_TO_CSV:
@@ -37,12 +38,16 @@ if LOG_TO_CSV:
 servo_logical_azimuth_angle = 90.0  # 0–360° azimuth
 servo_elevation_angle = 45.0        # 0–90° elevation
 
+# === Previous Physical Angles for Filtering ===
+prev_servo_az = None
+prev_servo_el = None
+
 # === GPS State ===
 drone_gps = {"lat": None, "lon": None, "alt": None}
 base_gps = {
-    "lat": 13.0276844,  # TODO: Add base latitude here (e.g., 12.9716)
-    "lon": 77.5631084 ,  # TODO: Add base longitude here (e.g., 77.5946)
-    "alt": 931.13   # TODO: Add base altitude in meters (e.g., 900.0)
+    "lat": 13.0276844,
+    "lon": 77.5631084,
+    "alt": 931.13
 }
 drone_gps_lock = threading.Lock()
 
@@ -99,16 +104,24 @@ mav_drone = connect_mavlink()
 
 # === Servo Control ===
 def set_angle(logical_az, elevation):
+    global prev_servo_az, prev_servo_el
+
     try:
         # Calculate physical servo angle based on gear ratio
         servo_az = logical_az / GEAR_RATIO
         servo_el = elevation / GEAR_RATIO
 
-        # Clamp servo angle to realistic range supported by the HiTec D645MW
+        # Clamp to 0–120° range
         servo_az = max(0, min(120, servo_az))
         servo_el = max(0, min(120, servo_el))
 
-        # Convert angle to duty cycle: 5% (0°) to 10% (120°)
+        # Check for significant change
+        if prev_servo_az is not None and abs(servo_az - prev_servo_az) < MIN_DEGREE_DELTA and \
+           prev_servo_el is not None and abs(servo_el - prev_servo_el) < MIN_DEGREE_DELTA:
+            debug("Angle change below threshold — skipping servo update")
+            return
+
+        # Convert to duty cycle (5% to 10%)
         duty_az = 5 + (servo_az * 5.0 / 120.0)
         duty_el = 5 + (servo_el * 5.0 / 120.0)
 
@@ -122,6 +135,11 @@ def set_angle(logical_az, elevation):
         time.sleep(0.5)
         pwm_azi.ChangeDutyCycle(0)
         pwm_ele.ChangeDutyCycle(0)
+
+        # Update previous values
+        prev_servo_az = servo_az
+        prev_servo_el = servo_el
+
     except Exception as e:
         debug(f"Servo error: {e}", "ERROR")
 
