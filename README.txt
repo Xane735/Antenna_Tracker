@@ -53,7 +53,7 @@ To set baudrate of the port communication:
 2. Hit Ctrl+F --> Select Mavlink --> Under First drop down select UDP client --> Input the IP address of the device and the port --> Hit connect      
 
 3. On raspi run: 
-     mavproxy.py --master=udp:0.0.0.0:14550 --out=udp:127.0.0.1:14551
+     mavproxy.py --master=udp:0.0.0.0:14550 --out=udp:192.168.1.193:14551
 
 4. View GPS coordinates:
     status
