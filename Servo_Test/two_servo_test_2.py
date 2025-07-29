@@ -25,7 +25,7 @@ servo_ele_pwm.start(0)
 def angle_to_duty(angle):
     return 2.5 + (angle / 18.0)  # Standard for SG90-type servos
 
-def move_servo(azi_angle, ele_angle):
+def set_angle(azi_angle, ele_angle):
     servo_az = GEAR_RATIO * azi_angle
     servo_el = GEAR_RATIO * ele_angle
 
@@ -49,13 +49,14 @@ def move_servo(azi_angle, ele_angle):
     servo_ele_pwm.ChangeDutyCycle(0)
 
 try:
-    # Sweep from 0 to 90 antenna degrees
-    for angle in range(0, 91, 15):  # Test in 15° steps
-        move_servo(angle, angle)
-        time.sleep(1)
+   set_angle(0, 0)
+   time.sleep(1)
+   set_angle(90, 0)
+   time.sleep(1)
+   set_angle(180, 0)
+   time.sleep(1)
+   set_angle(270, 0)
 
-    # Return to 0
-    move_servo(0, 0)
 
 except KeyboardInterrupt:
     print("Interrupted.")

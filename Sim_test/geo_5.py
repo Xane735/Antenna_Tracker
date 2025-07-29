@@ -32,7 +32,7 @@ PHYS_EL_MAX = SERVO_MAX_DEG * GEAR_RATIO_EL   # 0..240° physical tilt window
 
 # --- Calibration (world -> mechanism) ---
 # World az 0° = True North. If your mechanism's "physical 0°" points East, set +90 here, etc.
-AZIMUTH_ZERO_OFFSET_DEG = 0.0      # add to WORLD az before mapping into physical window
+AZIMUTH_ZERO_OFFSET_DEG = 30.0      # add to WORLD az before mapping into physical window
 ELEVATION_ZERO_OFFSET_DEG = 0.0    # add to WORLD el before mapping (usually 0)
 
 # If gear/mount reverses sense: set to True
@@ -83,6 +83,11 @@ def gps_print(msg):
 def move_print(msg):
     if VERBOSE_MOVEMENT:
         debug(msg, "MOVE")
+
+def print_az_coverage():
+    start = (120.0 - AZIMUTH_ZERO_OFFSET_DEG) % 360.0
+    end   = (360.0 - AZIMUTH_ZERO_OFFSET_DEG) % 360.0
+    print(f"[INFO] AZ window (world): {start:.1f}° → {end:.1f}° (span 240°), invert={AZIMUTH_INVERT}")
 
 # === GPIO Setup ===
 try:
@@ -345,6 +350,8 @@ def cleanup():
 # === Entry Point ===
 def main():
     debug("Starting Antenna Tracker")
+    # in main(), right after "Starting Antenna Tracker"
+    print_az_coverage()
     # Move to a known starting pose (uses calibration)
     set_angle(INITIAL_WORLD_AZ, INITIAL_WORLD_EL)
     if mav_drone:

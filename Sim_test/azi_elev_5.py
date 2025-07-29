@@ -183,13 +183,3 @@ def get_tracking_info(base_lat, base_lon, base_alt, target_lat, target_lon, targ
     except Exception as e:
         print(f"Error in get_tracking_info: {e}")
         return None
-
-# Legacy functions for backward compatibility
-def calculate_azimuth(lat1, lon1, lat2, lon2):
-    """Legacy function - use calculate_bearing instead"""
-    return round(calculate_bearing(lat1, lon1, lat2, lon2), 2)
-
-def calculate_elevation(lat1, lon1, lat2, lon2, alt1, alt2):
-    """Legacy function - use calculate_azimuth_elevation instead"""
-    _, elevation = calculate_azimuth_elevation(lat1, lon1, alt1, lat2, lon2, alt2)
-    return elevation
