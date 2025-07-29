@@ -1,77 +1,101 @@
-# Antenna Tracker (Calibration-aware, GPS-driven)
-# Updates az/el independently; smooth-move removed
+#!/usr/bin/env python3
+# geo_4_full360.py
+# Antenna Tracker (GPS-driven) — PAN 360° (2:1), TILT 2:1
+# - Full-circle azimuth (no windowing / no clamping)
+# - Elevation 2:1 gearing (world 0..90 -> servo 0..45)
+# - 1000–2000 µs PWM mapping at 50 Hz
+# - Independent per-axis updates with shared settle time
+# - MAVLink GPS input (GLOBAL_POSITION_INT), CSV logging
 
 import threading
 import time
 import math
-import azi_elev_5 as tracker
-import RPi.GPIO as GPIO
-from pymavlink import mavutil
 import csv
 from datetime import datetime
 
-# === Configuration ===
+import RPi.GPIO as GPIO
+from pymavlink import mavutil
+
+# Your math module (the one you already tested)
+import azi_elev_5 as tracker
+
+# ===================== Configuration =====================
 DEBUG = True
 VERBOSE_GPS = False
 VERBOSE_MOVEMENT = False
 LOG_TO_CSV = True
 
-CONNECTION_TIMEOUT = 10
 GPS_TIMEOUT = 5
 TRACKING_UPDATE_RATE = 1.0     # seconds between target recompute
 
-# --- Mechanics ---
-GEAR_RATIO_AZ = 2.0            # physical_out : servo (pan)
-GEAR_RATIO_EL = 2.0            # physical_out : servo (tilt)
-SERVO_MIN_DEG = 0.0
-SERVO_MAX_DEG = 120.0          # typical hobby servo usable range
-PHYS_AZ_MIN = SERVO_MIN_DEG * GEAR_RATIO_AZ
-PHYS_AZ_MAX = SERVO_MAX_DEG * GEAR_RATIO_AZ   # 0..240° physical pan window
-PHYS_EL_MIN = SERVO_MIN_DEG * GEAR_RATIO_EL
-PHYS_EL_MAX = SERVO_MAX_DEG * GEAR_RATIO_EL   # 0..240° physical tilt window
+# --- Mechanics (axis-specific) ---
+# Azimuth: 2:1 gear, 180° servo -> 360° physical (assumed continuous)
+GEAR_RATIO_AZ = 2.0
+SERVO_MAX_DEG_AZ = 180.0
+PHYS_AZ_MIN = 0.0
+PHYS_AZ_MAX = 360.0   # full circle
 
-# --- Calibration (world -> mechanism) ---
-# World az 0° = True North. If your mechanism's "physical 0°" points East, set +90 here, etc.
-AZIMUTH_ZERO_OFFSET_DEG = 30.0      # add to WORLD az before mapping into physical window
-ELEVATION_ZERO_OFFSET_DEG = 0.0    # add to WORLD el before mapping (usually 0)
+# Elevation: 2:1 gear; world elevation 0..90 -> servo 0..45
+GEAR_RATIO_EL = 2.0
+SERVO_MAX_DEG_EL = 180.0
+PHYS_EL_MIN = 0.0
+PHYS_EL_MAX = 180.0   # safe clamp
 
-# If gear/mount reverses sense: set to True
-AZIMUTH_INVERT = True
-ELEVATION_INVERT = False
+# PWM / timing
+PWM_FREQ_HZ = 50
+PULSE_MIN_US = 1000.0         # 1.000 ms
+PULSE_MAX_US = 2000.0         # 2.000 ms
+SETTLE_TIME_SEC = 1.0         # shared settle time
 
 # Per-axis minimum-change filter (in SERVO-side degrees)
-MIN_DEGREE_DELTA_SERVO = 4.5
+MIN_DEGREE_DELTA_SERVO = 1.0  # your preferred 3–5° range
 
-# Initial pose (world angles) for startup
-INITIAL_WORLD_AZ = 90.0
-INITIAL_WORLD_EL = 45.0
+# --- Calibration (world -> mechanism) ---
+# World az 0° = True North. Adjust these if your zero points differ.
+AZIMUTH_ZERO_OFFSET_DEG = 0.0      # add to WORLD az before mapping
+ELEVATION_ZERO_OFFSET_DEG = 0.0    # add to WORLD el before mapping
+AZIMUTH_INVERT = True              # True if pan sense is reversed
+ELEVATION_INVERT = False
 
-# === Logging Setup ===
+# --- GPIO Pins (BCM) ---
+SERVO_AZI_PIN = 18
+SERVO_ELE_PIN = 13
+
+# --- Startup pose (world angles) ---
+INITIAL_WORLD_AZ = 0.0
+INITIAL_WORLD_EL = 20.0
+
+# --- Base station position (ASL) ---
+base_gps = {
+    "lat": 13.0272176,
+    "lon": 77.5630984,
+    "alt": 931.13
+}
+
+# ===================== State & Logging =====================
+# Previous servo-side angles for delta filter
+prev_servo_az = None
+prev_servo_el = None
+
+# GPS state
+drone_gps = {"lat": None, "lon": None, "alt": None}
+drone_gps_lock = threading.Lock()
+
+# CSV logging
+log_writer = None
+log_file = None
 if LOG_TO_CSV:
-    log_file = open("antenna_tracking_log.csv", "w", newline="")
+    log_file = open(f"antenna_tracking_log-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv", "w", newline="")
     log_writer = csv.writer(log_file)
     log_writer.writerow([
         "Time", "Base Lat", "Base Lon", "Base Alt",
         "Drone Lat", "Drone Lon", "Drone Alt",
         "Elevation_cmd_world", "Azimuth_cmd_world",
         "Az_phys", "El_phys", "Az_servo", "El_servo",
-        "Distance", "Slant Distance"
+        "Horizontal_Distance", "Slant_Range"
     ])
 
-# === Previous servo-side angles for delta filter ===
-prev_servo_az = None
-prev_servo_el = None
-
-# === GPS State ===
-drone_gps = {"lat": None, "lon": None, "alt": None}
-base_gps = {
-    "lat": 13.0276844,
-    "lon": 77.5631084,
-    "alt": 931.13
-}
-drone_gps_lock = threading.Lock()
-
-# === Debugging helpers ===
+# ===================== Utils =====================
 def debug(msg, level="INFO"):
     if DEBUG:
         print(f"[{time.strftime('%H:%M:%S')}] [{level}] {msg}")
@@ -84,28 +108,71 @@ def move_print(msg):
     if VERBOSE_MOVEMENT:
         debug(msg, "MOVE")
 
-def print_az_coverage():
-    start = (120.0 - AZIMUTH_ZERO_OFFSET_DEG) % 360.0
-    end   = (360.0 - AZIMUTH_ZERO_OFFSET_DEG) % 360.0
-    print(f"[INFO] AZ window (world): {start:.1f}° → {end:.1f}° (span 240°), invert={AZIMUTH_INVERT}")
+def norm360(x: float) -> float:
+    return (x + 360.0) % 360.0
 
-# === GPIO Setup ===
-try:
+# ===================== Mapping =====================
+def apply_calibration_world_to_physical(az_world: float, el_world: float):
+    """
+    World -> calibrated world (offset/invert) -> PHYSICAL.
+    - PAN: treat 0..360° as valid (no window/folding).
+    - TILT: clamp to physical range (0..180 by default).
+    """
+    # Offsets
+    az_w = norm360(az_world + AZIMUTH_ZERO_OFFSET_DEG)
+    el_w = el_world + ELEVATION_ZERO_OFFSET_DEG
+
+    # Inversions
+    if AZIMUTH_INVERT:
+        az_w = norm360(360.0 - az_w)
+    if ELEVATION_INVERT:
+        el_w = -el_w
+
+    # Physical targets
+    az_phys = az_w                  # 0..360
+    el_phys = max(PHYS_EL_MIN, min(PHYS_EL_MAX, el_w))  # 0..180 clamp
+
+    return az_phys, el_phys
+
+def phys_to_servo(az_phys: float, el_phys: float):
+    """
+    PHYSICAL -> SERVO (deg). Axis-specific ratios and ranges.
+    With 2:1 gearing: servo = physical / 2.
+    So world el 0..90° -> servo el 0..45°.
+    """
+    az_servo = az_phys / GEAR_RATIO_AZ
+    el_servo = el_phys / GEAR_RATIO_EL
+    az_servo = max(0.0, min(SERVO_MAX_DEG_AZ, az_servo))
+    el_servo = max(0.0, min(SERVO_MAX_DEG_EL, el_servo))
+    return az_servo, el_servo
+
+def _us_to_duty(pulse_us: float, freq_hz: float = PWM_FREQ_HZ) -> float:
+    period_us = 1_000_000.0 / float(freq_hz)  # 20,000 us at 50 Hz
+    return 100.0 * (pulse_us / period_us)
+
+def _servo_deg_to_us(servo_deg: float, servo_max_deg: float) -> float:
+    # Linear 0..servo_max_deg -> 1000..2000 us
+    servo_deg = max(0.0, min(servo_max_deg, servo_deg))
+    return PULSE_MIN_US + (servo_deg / servo_max_deg) * (PULSE_MAX_US - PULSE_MIN_US)
+
+def servo_to_pwm_duty_axis(servo_deg: float, servo_max_deg: float) -> float:
+    pulse = _servo_deg_to_us(servo_deg, servo_max_deg)
+    return _us_to_duty(pulse)
+
+# ===================== GPIO Setup =====================
+def setup_gpio():
     GPIO.setmode(GPIO.BCM)
-    SERVO_AZI_PIN = 18
-    SERVO_ELE_PIN = 13
+    GPIO.setwarnings(False)
     GPIO.setup(SERVO_AZI_PIN, GPIO.OUT)
     GPIO.setup(SERVO_ELE_PIN, GPIO.OUT)
-    pwm_azi = GPIO.PWM(SERVO_AZI_PIN, 50)  # 50 Hz
-    pwm_ele = GPIO.PWM(SERVO_ELE_PIN, 50)
+    pwm_azi = GPIO.PWM(SERVO_AZI_PIN, PWM_FREQ_HZ)
+    pwm_ele = GPIO.PWM(SERVO_ELE_PIN, PWM_FREQ_HZ)
     pwm_azi.start(0)
     pwm_ele.start(0)
     debug("GPIO setup complete")
-except Exception as e:
-    debug(f"GPIO setup error: {e}", "ERROR")
-    raise
+    return pwm_azi, pwm_ele
 
-# === MAVLink Setup ===
+# ===================== MAVLink Setup =====================
 def connect_mavlink():
     try:
         mav = mavutil.mavlink_connection('udp:0.0.0.0:14551')
@@ -125,127 +192,60 @@ def connect_mavlink():
         debug(f"MAVLink connection failed: {e}", "ERROR")
         return None
 
-mav_drone = connect_mavlink()
-
-# === Angle utilities ===
-def norm360(x):
-    return (x + 360.0) % 360.0
-
-def apply_calibration_world_to_physical(az_world, el_world):
+# ===================== Servo Control =====================
+def set_angle(world_az: float, world_el: float, pwm_azi, pwm_ele):
     """
-    Convert world angles to *physical output* angles (post-gear), applying:
-      - zero offsets
-      - inversion
-      - az windowing to [PHYS_AZ_MIN, PHYS_AZ_MAX]
-    Returns: (az_phys, el_phys)
-    """
-
-    # 1) World -> calibrated world
-    az_w = norm360(az_world + AZIMUTH_ZERO_OFFSET_DEG)
-    el_w = el_world + ELEVATION_ZERO_OFFSET_DEG
-
-    if AZIMUTH_INVERT:
-        az_w = norm360(360.0 - az_w)
-    if ELEVATION_INVERT:
-        el_w = -el_w
-
-    # 2) World -> physical output angles (deg)
-    az_phys = az_w
-    # Fold into [0, PHYS_AZ_MAX] by subtracting 360 once if that places it in window
-    if az_phys > PHYS_AZ_MAX:
-        cand = az_phys - 360.0
-        if PHYS_AZ_MIN <= cand <= PHYS_AZ_MAX:
-            az_phys = cand
-
-    # Final clamp to window (warn if out-of-range)
-    if az_phys < PHYS_AZ_MIN or az_phys > PHYS_AZ_MAX:
-        debug(f"Target AZ {az_world:.2f}° (cal {az_w:.2f}°) outside pan window "
-              f"[{PHYS_AZ_MIN:.1f}, {PHYS_AZ_MAX:.1f}]°; clamping.", "WARN")
-        az_phys = max(PHYS_AZ_MIN, min(PHYS_AZ_MAX, az_phys))
-
-    # Tilt: apply offset/invert then clamp to physical
-    el_phys = max(PHYS_EL_MIN, min(PHYS_EL_MAX, el_w))
-
-    return az_phys, el_phys
-
-def phys_to_servo(az_phys, el_phys):
-    """Convert physical output angles to servo-side angles."""
-    az_servo = az_phys / GEAR_RATIO_AZ
-    el_servo = el_phys / GEAR_RATIO_EL
-    # Clamp to servo limits
-    az_servo = max(SERVO_MIN_DEG, min(SERVO_MAX_DEG, az_servo))
-    el_servo = max(SERVO_MIN_DEG, min(SERVO_MAX_DEG, el_servo))
-    return az_servo, el_servo
-
-def servo_to_pwm_duty(servo_deg):
-    # Map 0..SERVO_MAX_DEG => 5%..10%
-    return 5.0 + (servo_deg * 5.0 / SERVO_MAX_DEG)
-
-# === Servo Control (world angles in, PWM out) ===
-def set_angle(world_az, world_el):
-    """
-    Compute servo targets from world angles and update axes independently:
-    - If only AZ exceeds threshold, update only AZ.
-    - If only EL exceeds threshold, update only EL.
-    - If both exceed, update both together.
+    Compute servo targets from world angles and update axes independently.
+    Uses a single shared threshold and a single shared settle time.
     """
     global prev_servo_az, prev_servo_el
 
     try:
-        # Map world -> physical -> servo
+        # World -> physical -> servo
         az_phys, el_phys = apply_calibration_world_to_physical(world_az, world_el)
         servo_az, servo_el = phys_to_servo(az_phys, el_phys)
 
-        # Threshold checks (per-axis)
+        # Threshold per axis (servo-side degrees)
         update_az = (prev_servo_az is None) or (abs(servo_az - prev_servo_az) >= MIN_DEGREE_DELTA_SERVO)
         update_el = (prev_servo_el is None) or (abs(servo_el - prev_servo_el) >= MIN_DEGREE_DELTA_SERVO)
 
-        # Duty cycles (computed once)
-        duty_az = servo_to_pwm_duty(servo_az)
-        duty_el = servo_to_pwm_duty(servo_el)
-
-        # Diagnostics
-        debug(f"WORLD cmd  → Az {world_az:.2f}°, El {world_el:.2f}°")
-        debug(f"PHYS  cmd  → Az {az_phys:.2f}°, El {el_phys:.2f}°  | window [{PHYS_AZ_MIN:.0f},{PHYS_AZ_MAX:.0f}]")
-        debug(f"SERVO tgt → Az {servo_az:.2f}°, El {servo_el:.2f}°  | duty {duty_az:.2f}%, {duty_el:.2f}%")
-
-        # Decide updates
         if not update_az and not update_el:
             debug("Both axes below threshold — skipping PWM update")
             return
 
-        # Update logic:
-        # - If both need update: set both DC, sleep once, stop both.
-        # - Else update only the axis that changed.
-        if update_az and update_el:
-            print(f"[SET_SERVO] AZ: servo_input={servo_az:.2f}°, phys_target={az_phys:.2f}°, duty={duty_az:.2f}%")
-            print(f"[SET_SERVO] EL: servo_input={servo_el:.2f}°, phys_target={el_phys:.2f}°, duty={duty_el:.2f}%")
-            pwm_azi.ChangeDutyCycle(duty_az)
-            pwm_ele.ChangeDutyCycle(duty_el)
-            time.sleep(0.5)
-            pwm_azi.ChangeDutyCycle(0)
-            pwm_ele.ChangeDutyCycle(0)
-            prev_servo_az = servo_az
-            prev_servo_el = servo_el
-        else:
-            if update_az:
-                print(f"[SET_SERVO] AZ: servo_input={servo_az:.2f}°, phys_target={az_phys:.2f}°, duty={duty_az:.2f}%")
-                pwm_azi.ChangeDutyCycle(duty_az)
-                time.sleep(0.5)
-                pwm_azi.ChangeDutyCycle(0)
-                prev_servo_az = servo_az
-            else:
-                debug("AZ below threshold — no update")
-            if update_el:
-                print(f"[SET_SERVO] EL: servo_input={servo_el:.2f}°, phys_target={el_phys:.2f}°, duty={duty_el:.2f}%")
-                pwm_ele.ChangeDutyCycle(duty_el)
-                time.sleep(0.5)
-                pwm_ele.ChangeDutyCycle(0)
-                prev_servo_el = servo_el
-            else:
-                debug("EL below threshold — no update")
+        # Duties only for axes that update
+        duty_az = servo_to_pwm_duty_axis(servo_az, SERVO_MAX_DEG_AZ) if update_az else None
+        duty_el = servo_to_pwm_duty_axis(servo_el, SERVO_MAX_DEG_EL) if update_el else None
 
-        # CSV: log the *computed* targets (even if one axis didn’t update)
+        # Diagnostics
+        debug(f"WORLD cmd  → Az {world_az:.2f}°, El {world_el:.2f}°")
+        debug(f"PHYS  cmd  → Az {az_phys:.2f}°, El {el_phys:.2f}°  | pan 0..{PHYS_AZ_MAX:.0f}°")
+        debug(f"SERVO tgt → Az {servo_az:.2f}° (max {SERVO_MAX_DEG_AZ:.0f}), El {servo_el:.2f}° (max {SERVO_MAX_DEG_EL:.0f})")
+
+        if update_az:
+            print(f"[SET_SERVO] AZ: servo_input={servo_az:.2f}°, phys_target={az_phys:.2f}°, duty={duty_az:.2f}%")
+            pwm_azi.ChangeDutyCycle(duty_az)
+        else:
+            debug("AZ below threshold — no update")
+
+        if update_el:
+            print(f"[SET_SERVO] EL: servo_input={servo_el:.2f}°, phys_target={el_phys:.2f}°, duty={duty_el:.2f}%")
+            pwm_ele.ChangeDutyCycle(duty_el)
+        else:
+            debug("EL below threshold — no update")
+
+        # Shared settle time
+        time.sleep(SETTLE_TIME_SEC)
+
+        # Stop channels we started
+        if update_az:
+            pwm_azi.ChangeDutyCycle(0)
+            prev_servo_az = servo_az
+        if update_el:
+            pwm_ele.ChangeDutyCycle(0)
+            prev_servo_el = servo_el
+
+        # Log computed targets (even if only one axis updated)
         if LOG_TO_CSV:
             with drone_gps_lock:
                 log_writer.writerow([
@@ -259,7 +259,7 @@ def set_angle(world_az, world_el):
     except Exception as e:
         debug(f"Servo error: {e}", "ERROR")
 
-# === GPS Thread ===
+# ===================== GPS Thread =====================
 def update_gps(mav, gps_dict, lock):
     debug("Drone GPS thread started")
     errors = 0
@@ -281,7 +281,7 @@ def update_gps(mav, gps_dict, lock):
             errors += 1
             time.sleep(1)
 
-# === Tracking and Logging ===
+# ===================== Tracking & Logging =====================
 def calculate_tracking_angles():
     with drone_gps_lock:
         if not all([drone_gps["lat"], drone_gps["lon"], drone_gps["alt"]]):
@@ -301,32 +301,14 @@ def calculate_tracking_angles():
             debug(f"Angle calculation error: {e}", "ERROR")
             return None
 
-def log_to_csv_tracking(info):
-    if not LOG_TO_CSV:
-        return
-    try:
-        with drone_gps_lock:
-            log_writer.writerow([
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                base_gps["lat"], base_gps["lon"], base_gps["alt"],
-                drone_gps["lat"], drone_gps["lon"], drone_gps["alt"],
-                info["elevation"], info["azimuth"], "", "", "", "",
-                info["horizontal_distance"], info["slant_range"]
-            ])
-            log_file.flush()
-    except Exception as e:
-        debug(f"Log error: {e}", "ERROR")
-
-def tracking_loop():
+def tracking_loop(pwm_azi, pwm_ele):
     debug("Tracking loop started")
     while True:
         try:
             info = calculate_tracking_angles()
             if info:
-                # Log raw tracking numbers (world frame + ranges)
-                log_to_csv_tracking(info)
-                # Command directly with world angles (calibration handled inside set_angle)
-                set_angle(info["adjusted_azimuth"], info["adjusted_elevation"])
+                # Move using world angles (calibration & gearing handled inside set_angle)
+                set_angle(info["adjusted_azimuth"], info["adjusted_elevation"], pwm_azi, pwm_ele)
             time.sleep(TRACKING_UPDATE_RATE)
         except KeyboardInterrupt:
             debug("Stopped by user")
@@ -335,34 +317,42 @@ def tracking_loop():
             debug(f"Loop error: {e}", "ERROR")
             time.sleep(5)
 
-# === Cleanup ===
-def cleanup():
+# ===================== Cleanup =====================
+def cleanup(pwm_azi, pwm_ele):
     debug("Cleaning up GPIO and logging")
     try:
+        pwm_azi.ChangeDutyCycle(0); pwm_ele.ChangeDutyCycle(0)
+        time.sleep(0.2)
         pwm_azi.stop()
         pwm_ele.stop()
         GPIO.cleanup()
-        if LOG_TO_CSV:
+        if LOG_TO_CSV and log_file:
             log_file.close()
     except Exception as e:
         debug(f"Cleanup error: {e}", "ERROR")
 
-# === Entry Point ===
+# ===================== Main =====================
 def main():
     debug("Starting Antenna Tracker")
-    # in main(), right after "Starting Antenna Tracker"
-    print_az_coverage()
-    # Move to a known starting pose (uses calibration)
-    set_angle(INITIAL_WORLD_AZ, INITIAL_WORLD_EL)
+    pwm_azi, pwm_ele = setup_gpio()
+
+    # Move to a known starting pose
+    set_angle(INITIAL_WORLD_AZ, INITIAL_WORLD_EL, pwm_azi, pwm_ele)
+
+    # MAVLink
+    mav_drone = connect_mavlink()
     if mav_drone:
         threading.Thread(target=update_gps, args=(mav_drone, drone_gps, drone_gps_lock), daemon=True).start()
-    time.sleep(5)
-    tracking_loop()
+
+    # Tracking
+    try:
+        time.sleep(2)
+        tracking_loop(pwm_azi, pwm_ele)
+    finally:
+        cleanup(pwm_azi, pwm_ele)
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
         debug("Shutdown by user")
-    finally:
-        cleanup()
