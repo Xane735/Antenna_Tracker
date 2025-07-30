@@ -8,7 +8,7 @@ ELE_PIN = 13
 
 # Servo mechanical limits (degrees on the servo horn)
 SERVO_MIN_DEG = 0
-SERVO_MAX_DEG = 120   # your servo capability
+SERVO_MAX_DEG = 180   # your servo capability
 
 # External gear ratio (physical_out : servo)
 GEAR_RATIO = 2.0      # 2:1 -> physical angle = 2 * servo angle
