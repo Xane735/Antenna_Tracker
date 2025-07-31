@@ -28,12 +28,12 @@ EL_PHYS_MAX = 180.0
 # Servo (electrical) limits & mapping
 PULSE_MIN_US    = 1000.0  
 PULSE_MAX_US    = 2000.0
-SERVO_RANGE_DEG = 180.0   # standard hobby servo ~180° for 1000–2000 µs
+SERVO_RANGE_DEG = 90.0   # standard hobby servo ~180° for 1000–2000 µs
 
 # Calibration (apply to world angles before gearing)
 AZIMUTH_ZERO_OFFSET_DEG   = 0.0
 ELEVATION_ZERO_OFFSET_DEG = 0.0
-AZIMUTH_INVERT   = True    # set True if your tested system needs it (you said True works)
+AZIMUTH_INVERT   = False    # set True if your tested system needs it (you said True works)
 ELEVATION_INVERT = False
 
 # pigpio GPIO pins (BCM numbering)
@@ -70,16 +70,26 @@ def world_to_physical(az_world_cal: float, el_world_cal: float):
     return az_phys, el_phys
 
 def physical_to_servo_deg(az_phys: float, el_phys: float):
-    """2:1 gearing: servo_deg = physical / 2."""
-    az_servo = az_phys / GEAR_RATIO
-    el_servo = el_phys / GEAR_RATIO
-    # keep inside servo's usable range
-    az_servo = max(0.0, min(SERVO_RANGE_DEG, az_servo))
-    el_servo = max(0.0, min(SERVO_RANGE_DEG, el_servo))
+    """2:1 gearing: servo_deg = physical / GEAR_RATIO, then clamp to servo range."""
+    az_raw = az_phys / GEAR_RATIO
+    el_raw = el_phys / GEAR_RATIO
+
+    # Clamp to servo's usable range
+    az_servo = max(0.0, min(SERVO_RANGE_DEG, az_raw))
+    el_servo = max(0.0, min(SERVO_RANGE_DEG, el_raw))
+
+    # Warn if we had to clip (means requested > 180° physical on 2:1 with 90° servo)
+    if az_servo != az_raw:
+        print(f"[WARN] Azimuth demand {az_phys:.1f}° phys -> {az_raw:.1f}° servo exceeds "
+              f"{SERVO_RANGE_DEG}°. Clipping to {az_servo:.1f}°.")
+    if el_servo != el_raw:
+        print(f"[WARN] Elevation demand {el_phys:.1f}° phys -> {el_raw:.1f}° servo exceeds "
+              f"{SERVO_RANGE_DEG}°. Clipping to {el_servo:.1f}°.")
+
     return az_servo, el_servo
 
 def servo_deg_to_us(servo_deg: float) -> float:
-    """Map 0..180 servo degrees → 1000..2000 µs linearly."""
+    """Map 0..SERVO_RANGE_DEG servo degrees → 1000..2000 µs linearly."""
     servo_deg = max(0.0, min(SERVO_RANGE_DEG, servo_deg))
     return PULSE_MIN_US + (servo_deg / SERVO_RANGE_DEG) * (PULSE_MAX_US - PULSE_MIN_US)
 
