@@ -1,5 +1,15 @@
+#!/usr/bin/env python3
+"""
+Antenna-tracker control:
+• Reads drone GPS via MAVLink (GLOBAL_POSITION_INT on UDP :14551)
+• Calculates ideal az/el with azi_elev_5.py
+• Applies calibration, clamps to physical limits, maps through 2 : 1 gearing
+• Drives two hobby servos via pigpio PWM
+
+Now configured for a **180 ° servo** (900-2100 µs) ⇒ **360 ° physical** travel.
+"""
+
 import time
-import math
 from datetime import datetime
 import pigpio
 from pymavlink import mavutil
@@ -7,11 +17,11 @@ import azi_elev_5 as tracker
 
 # ===================== Configuration =====================
 
-# Base station (ASL). 
+# Base station reference (only used if you’re NOT feeding a live base-GPS)
 base_gps = {
     "lat": 13.0276816,
     "lon": 77.5630373,
-    "alt": 931.13
+    "alt": 931.13,          # metres ASL
 }
 
 # Gear spokes → ratio (physical_out : servo)
@@ -21,40 +31,42 @@ GEAR_RATIO   = SPOKES_BIG / SPOKES_SMALL      # == 2.0
 
 # Physical limits (mechanism side)
 AZ_PHYS_MIN = 0.0
-AZ_PHYS_MAX = 350.0       # request max motion but keep a small safety margin
+AZ_PHYS_MAX = 350.0        # keep a small safety margin
 EL_PHYS_MIN = 0.0
 EL_PHYS_MAX = 180.0
 
-# Servo (electrical) limits & mapping
-PULSE_MIN_US    = 1000.0  
-PULSE_MAX_US    = 2000.0
-SERVO_RANGE_DEG = 90.0   # standard hobby servo ~180° for 1000–2000 µs
+# Servo (electrical) limits & mapping ― **180 ° servo**
+PULSE_MIN_US    = 900.0    # tune these two if endpoints need trim
+PULSE_MAX_US    = 2100.0
+SERVO_RANGE_DEG = 180.0    # 0–180 ° servo travel maps over 900–2100 µs
 
 # Calibration (apply to world angles before gearing)
 AZIMUTH_ZERO_OFFSET_DEG   = 0.0
 ELEVATION_ZERO_OFFSET_DEG = 0.0
-AZIMUTH_INVERT   = False    # set True if your tested system needs it (you said True works)
-ELEVATION_INVERT = False
+AZIMUTH_INVERT   = True   # True flips CW/CCW
+ELEVATION_INVERT = False   # True flips up/down
 
 # pigpio GPIO pins (BCM numbering)
 SERVO_AZ_PIN = 18
 SERVO_EL_PIN = 13
 
 # Update cadence
-UPDATE_PERIOD_S   = 0.20   # 5 Hz; lower if your servos jitter
-MAV_MSG_INTERVAL_US = 200000  # request GLOBAL_POSITION_INT at 5 Hz
+UPDATE_PERIOD_S      = 0.20        # 5 Hz
+MAV_MSG_INTERVAL_US  = 200_000     # request GLOBAL_POSITION_INT at 5 Hz
 
 # Logging
-PRINT_EVERY = 1            # print every N cycles
-LOG_TO_CSV  = True        # set True to write a CSV file (basic columns)
+PRINT_EVERY = 1                    # console print each cycle
+LOG_TO_CSV  = True                 # write a CSV log
 
-# ============== Small helpers ==============
+# =========================================================
+# ------------------- Helper functions --------------------
+# =========================================================
 
 def norm360(x: float) -> float:
     return (x + 360.0) % 360.0
 
 def apply_calibration(az_world: float, el_world: float):
-    """Zero/invert in WORLD frame, before gearing/limits."""
+    """Zero-offset & optional inversion in WORLD frame (before gearing)."""
     az = norm360(az_world + AZIMUTH_ZERO_OFFSET_DEG)
     el = el_world + ELEVATION_ZERO_OFFSET_DEG
     if AZIMUTH_INVERT:
@@ -64,55 +76,61 @@ def apply_calibration(az_world: float, el_world: float):
     return az, el
 
 def world_to_physical(az_world_cal: float, el_world_cal: float):
-    """Physical targets (mechanism) from calibrated world angles."""
+    """Apply hard stops of the mechanism."""
     az_phys = max(AZ_PHYS_MIN, min(AZ_PHYS_MAX, az_world_cal))
     el_phys = max(EL_PHYS_MIN, min(EL_PHYS_MAX, el_world_cal))
     return az_phys, el_phys
 
 def physical_to_servo_deg(az_phys: float, el_phys: float):
-    """2:1 gearing: servo_deg = physical / GEAR_RATIO, then clamp to servo range."""
+    """
+    Convert physical motion → servo degrees via the 2 : 1 gearing,
+    then clamp to the servo’s **180 °** usable range.
+    """
     az_raw = az_phys / GEAR_RATIO
     el_raw = el_phys / GEAR_RATIO
 
-    # Clamp to servo's usable range
     az_servo = max(0.0, min(SERVO_RANGE_DEG, az_raw))
     el_servo = max(0.0, min(SERVO_RANGE_DEG, el_raw))
 
-    # Warn if we had to clip (means requested > 180° physical on 2:1 with 90° servo)
+    # Warn if we had to clip
     if az_servo != az_raw:
-        print(f"[WARN] Azimuth demand {az_phys:.1f}° phys -> {az_raw:.1f}° servo exceeds "
-              f"{SERVO_RANGE_DEG}°. Clipping to {az_servo:.1f}°.")
+        print(f"[WARN] Az demand {az_phys:.1f}° phys -> {az_raw:.1f}° servo exceeds "
+              f"{SERVO_RANGE_DEG}°. Clipped to {az_servo:.1f}°.")
     if el_servo != el_raw:
-        print(f"[WARN] Elevation demand {el_phys:.1f}° phys -> {el_raw:.1f}° servo exceeds "
-              f"{SERVO_RANGE_DEG}°. Clipping to {el_servo:.1f}°.")
+        print(f"[WARN] El demand {el_phys:.1f}° phys -> {el_raw:.1f}° servo exceeds "
+              f"{SERVO_RANGE_DEG}°. Clipped to {el_servo:.1f}°.")
 
     return az_servo, el_servo
 
 def servo_deg_to_us(servo_deg: float) -> float:
-    """Map 0..SERVO_RANGE_DEG servo degrees → 1000..2000 µs linearly."""
+    """Linear map 0–180 ° → 900–2100 µs."""
     servo_deg = max(0.0, min(SERVO_RANGE_DEG, servo_deg))
     return PULSE_MIN_US + (servo_deg / SERVO_RANGE_DEG) * (PULSE_MAX_US - PULSE_MIN_US)
 
-# ============== pigpio setup ==============
+# =========================================================
+# ---------------------- pigpio init ----------------------
+# =========================================================
 
 def setup_pigpio():
     pi = pigpio.pi()
     if not pi.connected:
-        raise RuntimeError("pigpio daemon not running. Start with: sudo pigpiod  (or sudo pigpio on older)")
+        raise RuntimeError("pigpio daemon not running (start with sudo pigpiod)")
     pi.set_mode(SERVO_AZ_PIN, pigpio.OUTPUT)
     pi.set_mode(SERVO_EL_PIN, pigpio.OUTPUT)
-    print("[INFO] pigpio ready (pins AZ=%d, EL=%d)" % (SERVO_AZ_PIN, SERVO_EL_PIN))
+    print(f"[INFO] pigpio ready (AZ pin {SERVO_AZ_PIN}, EL pin {SERVO_EL_PIN})")
     return pi
 
-# ============== MAVLink ==============
+# =========================================================
+# ---------------------- MAVLink I/O ----------------------
+# =========================================================
 
 def connect_mavlink():
-    # Adjust endpoint if needed (e.g., 14550). You used 14551 before.
     mav = mavutil.mavlink_connection("udp:0.0.0.0:14551")
     print("Waiting for heartbeat...")
     mav.wait_heartbeat()
     print(f"Connected (sys={mav.target_system}, comp={mav.target_component})")
-    # Ask for GLOBAL_POSITION_INT at desired rate
+
+    # Ask sender to stream GLOBAL_POSITION_INT at ~5 Hz
     mav.mav.command_long_send(
         mav.target_system, mav.target_component,
         mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
@@ -121,11 +139,12 @@ def connect_mavlink():
     )
     return mav
 
-
-# ============== Optional CSV logging ==============
+# =========================================================
+# ----------------------- CSV log -------------------------
+# =========================================================
 
 _log_writer = None
-_log_file = None
+_log_file   = None
 
 def log_open():
     global _log_writer, _log_file
@@ -133,6 +152,7 @@ def log_open():
         return
     import csv
     from pathlib import Path
+    Path("Tracker_Logs").mkdir(exist_ok=True)
     fn = Path(f"Tracker_Logs/Tracker_Log{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv")
     _log_file = fn.open("w", newline="")
     _log_writer = csv.writer(_log_file)
@@ -142,9 +162,9 @@ def log_open():
         "CalAz", "CalEl",
         "PhysAz", "PhysEl",
         "ServoAz_deg", "ServoEl_deg",
-        "PulseAz_us", "PulseEl_us"
+        "PulseAz_us", "PulseEl_us",
     ])
-    print(f"[INFO] CSV log: {fn}")
+    print(f"[INFO] CSV log → {fn}")
 
 def log_row(*row):
     if LOG_TO_CSV and _log_writer:
@@ -155,38 +175,31 @@ def log_close():
     if LOG_TO_CSV and _log_file:
         _log_file.close()
 
-
-# ============== Main tracking loop ==============
+# =========================================================
+# --------------------- Main  loop ------------------------
+# =========================================================
 
 def main():
-    print("=== Antenna Tracker (pigpio minimal, 2:1 gear, 350° az clamp) ===")
-    print(f"[CFG] Base @ lat={base_gps['lat']}, lon={base_gps['lon']}, alt={base_gps['alt']} m")
-    print(f"[CFG] Spokes small={SPOKES_SMALL}, big={SPOKES_BIG} → ratio={GEAR_RATIO:.2f}:1 (phys:servo)")
-    print(f"[CFG] Physical limits: AZ 0..{AZ_PHYS_MAX}°, EL 0..{EL_PHYS_MAX}°")
-    print(f"[CFG] Pulses: {PULSE_MIN_US:.0f}–{PULSE_MAX_US:.0f} µs   ServoRange={SERVO_RANGE_DEG}°")
-    print(f"[CFG] Cal: AZ_OFFSET={AZIMUTH_ZERO_OFFSET_DEG}°, EL_OFFSET={ELEVATION_ZERO_OFFSET_DEG}°, "
-          f"AZ_INV={AZIMUTH_INVERT}, EL_INV={ELEVATION_INVERT}")
+    print("=== Antenna Tracker (pigpio, 2:1 gear, 360° capable) ===")
+    print(f"[CFG] Base reference lat={base_gps['lat']}, lon={base_gps['lon']}, alt={base_gps['alt']} m")
+    print(f"[CFG] Servo range {SERVO_RANGE_DEG}°, pulses {PULSE_MIN_US:.0f}–{PULSE_MAX_US:.0f} µs")
+    print(f"[CFG] Physical limits AZ 0–{AZ_PHYS_MAX}°, EL 0–{EL_PHYS_MAX}°")
 
-    pi = setup_pigpio()
+    pi  = setup_pigpio()
     log_open()
-
-    # Initialize servos to a sane pose (e.g., world 0/20 maps through calibration & gearing)
-    init_world_az = 0.0
-    init_world_el = 20.0
-    cal_az, cal_el = apply_calibration(init_world_az, init_world_el)
-    phys_az, phys_el = world_to_physical(cal_az, cal_el)
-    s_az, s_el = physical_to_servo_deg(phys_az, phys_el)
-    pi.set_servo_pulsewidth(SERVO_AZ_PIN, servo_deg_to_us(s_az))
-    pi.set_servo_pulsewidth(SERVO_EL_PIN, servo_deg_to_us(s_el))
-    time.sleep(0.3)
-
-    # MAVLink
     mav = connect_mavlink()
+
+    # Initialise servos: world 0/20 °
+    init_cal_az, init_cal_el = apply_calibration(0.0, 20.0)
+    init_phys_az, init_phys_el = world_to_physical(init_cal_az, init_cal_el)
+    init_s_az, init_s_el = physical_to_servo_deg(init_phys_az, init_phys_el)
+    pi.set_servo_pulsewidth(SERVO_AZ_PIN, servo_deg_to_us(init_s_az))
+    pi.set_servo_pulsewidth(SERVO_EL_PIN, servo_deg_to_us(init_s_el))
+    time.sleep(0.3)
 
     cycle = 0
     try:
         while True:
-            # Wait for a GLOBAL_POSITION_INT
             msg = mav.recv_match(type="GLOBAL_POSITION_INT", blocking=True, timeout=1.5)
             if not msg:
                 print("[WARN] No GPS update")
@@ -196,7 +209,7 @@ def main():
             drone_lon = msg.lon / 1e7
             drone_alt = msg.alt / 1000.0
 
-            # Compute angles with your proven math
+            # 1. Get ideal az/el
             info = tracker.get_tracking_info(
                 base_gps["lat"], base_gps["lon"], base_gps["alt"],
                 drone_lat, drone_lon, drone_alt
@@ -207,35 +220,32 @@ def main():
             world_az = info.get("adjusted_azimuth", info["azimuth"])
             world_el = info.get("adjusted_elevation", info["elevation"])
 
-            # Apply calibration → physical clamps → gearing
-            cal_az, cal_el   = apply_calibration(world_az, world_el)
+            # 2. Calibration → physical clamp → gearing
+            cal_az,  cal_el  = apply_calibration(world_az, world_el)
             phys_az, phys_el = world_to_physical(cal_az, cal_el)
             s_az, s_el       = physical_to_servo_deg(phys_az, phys_el)
 
-            # Pulses
+            # 3. Convert to pulse-width & drive servos
             pulse_az = servo_deg_to_us(s_az)
             pulse_el = servo_deg_to_us(s_el)
-
-            # Drive servos (keep pulses applied continuously)
             pi.set_servo_pulsewidth(SERVO_AZ_PIN, pulse_az)
             pi.set_servo_pulsewidth(SERVO_EL_PIN, pulse_el)
 
-            # Light console print
-            if (cycle % PRINT_EVERY) == 0:
+            # 4. Console & CSV
+            if cycle % PRINT_EVERY == 0:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] "
-                      f"WORLD Az/El: {world_az:6.2f}/{world_el:5.2f}°  "
-                      f"CAL Az/El: {cal_az:6.2f}/{cal_el:5.2f}°  "
-                      f"PHYS Az/El: {phys_az:6.2f}/{phys_el:5.2f}°  "
-                      f"SERVO Az/El: {s_az:6.2f}/{s_el:5.2f}°  "
-                      f"µs Az/El: {pulse_az:5.0f}/{pulse_el:5.0f}")
-
+                      f"WORLD Az/El {world_az:6.2f}/{world_el:5.2f}°  "
+                      f"CAL {cal_az:6.2f}/{cal_el:5.2f}°  "
+                      f"PHYS {phys_az:6.2f}/{phys_el:5.2f}°  "
+                      f"SERVO {s_az:6.2f}/{s_el:5.2f}°  "
+                      f"µs {pulse_az:5.0f}/{pulse_el:5.0f}")
             log_row(
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                round(world_az, 3), round(world_el, 3),
-                round(cal_az, 3), round(cal_el, 3),
-                round(phys_az, 3), round(phys_el, 3),
-                round(s_az, 3), round(s_el, 3),
-                round(pulse_az, 1), round(pulse_el, 1)
+                round(world_az,3), round(world_el,3),
+                round(cal_az,3),   round(cal_el,3),
+                round(phys_az,3),  round(phys_el,3),
+                round(s_az,3),     round(s_el,3),
+                round(pulse_az,1), round(pulse_el,1),
             )
 
             cycle += 1
@@ -243,17 +253,19 @@ def main():
 
     except KeyboardInterrupt:
         print("\n[INFO] Stopped by user")
+
     finally:
-        # Safe shutdown
         try:
+            # Park & release PWM
+            pi.set_servo_pulsewidth(SERVO_AZ_PIN, servo_deg_to_us(0.0))
+            pi.set_servo_pulsewidth(SERVO_EL_PIN, servo_deg_to_us(0.0))
+            time.sleep(0.2)
             pi.set_servo_pulsewidth(SERVO_AZ_PIN, 0)
             pi.set_servo_pulsewidth(SERVO_EL_PIN, 0)
-            time.sleep(0.2)
             pi.stop()
         except Exception as e:
             print(f"[WARN] pigpio cleanup: {e}")
         log_close()
-
 
 if __name__ == "__main__":
     main()
