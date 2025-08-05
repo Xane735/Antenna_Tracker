@@ -35,9 +35,9 @@ def main():
         print("Error: pigpio daemon not running. Start it with: sudo pigpiod")
         sys.exit(1)
 
-    '''for i in range (5):
+    for i in range (5):
         pulse_ms_val = input("Enter the Signal Value")
-        set_pulse_and_wait(pi, args.pins, pulse_ms_val, args.dwell, args.interactive)'''
+        set_pulse_and_wait(pi, args.pins, pulse_ms_val, args.dwell, args.interactive)
 
 
     pulses_us = [900, 1500, 2100]
