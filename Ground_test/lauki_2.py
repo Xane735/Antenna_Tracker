@@ -1,11 +1,5 @@
+# Tested, has offset error
 #!/usr/bin/env python3
-"""
-Dual-GPS Antenna Tracker
-– Drone GPS on /dev/ttyACM0  (115200)       ← change DRONE_BAUD if 57600
-– Base GPS on  /dev/ttyUSB0  (57600)
-
-Servo is now **180 deg** (900-2100 µs) → 360 deg physical via 2 : 1 gearing.
-"""
 
 import time
 from datetime import datetime
@@ -37,16 +31,16 @@ GEAR_RATIO   = SPOKES_BIG / SPOKES_SMALL     # 2.0
 
 # Physical limits (mechanism)
 AZ_PHYS_MIN = 0.0
-AZ_PHYS_MAX = 350.0        # full rotation (leave 10 ° safety)
+AZ_PHYS_MAX = 350.0
 EL_PHYS_MIN = 0.0
 EL_PHYS_MAX = 180.0
 
-# Servo electrical limits – **180 ° servo**
+# Servo electrical limits – **180° servo**
 PULSE_MIN_US    = 900.0
 PULSE_MAX_US    = 2100.0
-SERVO_RANGE_DEG = 180.0     # <<< changed from 90.0
+SERVO_RANGE_DEG = 180.0
 
-# Calibration
+# Calibration (applies only when mapping world→physical)
 AZIMUTH_ZERO_OFFSET_DEG   = 30.0
 ELEVATION_ZERO_OFFSET_DEG = 0.0
 AZIMUTH_INVERT   = True
@@ -61,6 +55,7 @@ UPDATE_PERIOD_S = 0.20      # 5 Hz servo update
 PRINT_EVERY     = 1         # console print every cycle
 LOG_TO_CSV      = True
 
+# Optional world-frame startup pose (no longer used for initial park-to-zero)
 STARTUP_AZ_WORLD = 0.0
 STARTUP_EL_WORLD = 0.0
 
@@ -111,6 +106,16 @@ def physical_to_servo_deg(az_phys: float, el_phys: float) -> Tuple[float, float]
 def servo_deg_to_us(deg: float) -> float:
     deg = max(0.0, min(SERVO_RANGE_DEG, deg))
     return PULSE_MIN_US + (deg / SERVO_RANGE_DEG) * (PULSE_MAX_US - PULSE_MIN_US)
+
+# --- NEW: explicit park to servo 0°/0° regardless of calibration/inversion ---
+def park_servos_zero(pi: pigpio.pi, dwell_s: float = 0.5):
+    """Immediately drive both servos to 0° (servo degrees), then dwell."""
+    us_az = servo_deg_to_us(0.0)
+    us_el = servo_deg_to_us(0.0)
+    pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
+    pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
+    print(f"[INIT] Parked servos to 0°/0° (µs {us_az:.0f}/{us_el:.0f}); dwell {dwell_s:.1f}s")
+    time.sleep(dwell_s)
 
 # =========================================================
 # --------------------- pigpio init -----------------------
@@ -187,7 +192,7 @@ _log_writer = _log_file = None
 def log_open():
     global _log_writer,_log_file
     if not LOG_TO_CSV: return
-    import csv, pathlib, os
+    import csv, pathlib
     pathlib.Path("Tracker_Logs").mkdir(exist_ok=True)
     fn = pathlib.Path(f"Tracker_Logs/Tracker_{datetime.now():%Y%m%d-%H%M%S}.csv")
     _log_file = fn.open("w", newline="")
@@ -208,20 +213,18 @@ def log_close():
 # =========================================================
 
 def main():
-    print("=== Dual-GPS Tracker | 180° servo → 360° phys ===")
-    pi = setup_pigpio();   log_open()
+    print("=== Dual-GPS Tracker | startup park to 0°/0° | 180° servo → 360° phys ===")
+    pi = setup_pigpio()
+    log_open()
 
+    # --- NEW: explicitly park to 0°/0° (servo degrees) at startup ---
+    park_servos_zero(pi, dwell_s=0.5)
+
+    # Connect MAVLink and start readers
     mav_drone = connect_mav(DRONE_ENDPOINT, DRONE_BAUD,  True)
     mav_base  = connect_mav(BASE_ENDPOINT,  BASE_BAUD,   False)
     start_reader(mav_drone, drone_gps, _drone_lock)
     start_reader(mav_base,  base_gps,  _base_lock)
-
-    # park at startup pose
-    s0 = physical_to_servo_deg(*world_to_physical(
-            *apply_calibration(STARTUP_AZ_WORLD, STARTUP_EL_WORLD)))
-    pi.set_servo_pulsewidth(SERVO_AZ_PIN, servo_deg_to_us(s0[0]))
-    pi.set_servo_pulsewidth(SERVO_EL_PIN, servo_deg_to_us(s0[1]))
-    time.sleep(0.3)
 
     cycle = 0
     try:
@@ -243,37 +246,36 @@ def main():
             c_az,c_el   = apply_calibration(w_az, w_el)
             p_az,p_el   = world_to_physical(c_az, c_el)
             s_az,s_el   = physical_to_servo_deg(p_az, p_el)
-            µs_az,µs_el = servo_deg_to_us(s_az), servo_deg_to_us(s_el)
+            us_az,us_el = servo_deg_to_us(s_az), servo_deg_to_us(s_el)
 
-            pi.set_servo_pulsewidth(SERVO_AZ_PIN, µs_az)
-            pi.set_servo_pulsewidth(SERVO_EL_PIN, µs_el)
+            pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
+            pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
 
             if cycle % PRINT_EVERY == 0:
                 print(f"[{datetime.now():%H:%M:%S}] "
                       f"WORLD {w_az:6.2f}/{w_el:5.2f}°  "
                       f"PHYS {p_az:6.2f}/{p_el:5.2f}°  "
                       f"SERVO {s_az:6.2f}/{s_el:5.2f}°  "
-                      f"µs {µs_az:5.0f}/{µs_el:5.0f}")
+                      f"µs {us_az:5.0f}/{us_el:5.0f}")
             log_row(datetime.now().isoformat(timespec='seconds'),
                     round(w_az,3),round(w_el,3),
                     round(c_az,3),round(c_el,3),
                     round(p_az,3),round(p_el,3),
                     round(s_az,3),round(s_el,3),
-                    round(µs_az,1),round(µs_el,1),
+                    round(us_az,1),round(us_el,1),
                     round(drone["lat"],7),round(drone["lon"],7),round(drone["alt"],1),
                     round(base["lat"],7), round(base["lon"],7), round(base["alt"],1))
             cycle += 1
             time.sleep(UPDATE_PERIOD_S)
 
     except KeyboardInterrupt:
-        print("\n[INFO] Ctrl-C – shutting down")
+        print("\n[INFO] Ctrl-C, shutting down")
 
     finally:
         stop_event.set()
         try:
-            pi.set_servo_pulsewidth(SERVO_AZ_PIN, servo_deg_to_us(0.0))
-            pi.set_servo_pulsewidth(SERVO_EL_PIN, servo_deg_to_us(0.0))
-            time.sleep(0.2)
+            # Park to 0°/0° on shutdown, then release PWM
+            park_servos_zero(pi, dwell_s=0.2)
             pi.set_servo_pulsewidth(SERVO_AZ_PIN, 0)
             pi.set_servo_pulsewidth(SERVO_EL_PIN, 0)
             pi.stop()
