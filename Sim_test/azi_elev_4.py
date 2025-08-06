@@ -1,4 +1,5 @@
 # Does not use Spherical Trignometry, Assume ENU (Simple Local Tangenet Plane - Flat Earth Model)
+# Outdated Code
 import math
 
 # Earth approximation constants

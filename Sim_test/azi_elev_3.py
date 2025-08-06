@@ -1,4 +1,4 @@
-#Version 3 of azi_elev.py, currently working code
+#Version 3 of azi_elev.py, Outdated Code
 import math
 
 '''
