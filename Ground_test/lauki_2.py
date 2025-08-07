@@ -43,8 +43,8 @@ SERVO_RANGE_DEG = 180.0
 # Calibration (applies only when mapping world→physical)
 AZIMUTH_ZERO_OFFSET_DEG   = 30.0
 ELEVATION_ZERO_OFFSET_DEG = 0.0
-AZIMUTH_INVERT   = True
-ELEVATION_INVERT = True
+AZIMUTH_INVERT   = False
+ELEVATION_INVERT = False
 
 # GPIO pins (BCM)
 SERVO_AZ_PIN = 18

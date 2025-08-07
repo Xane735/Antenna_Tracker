@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""
+geo_7.py — unified tracker with lauki_2.py logic, zero-reference capture, and low-pass smoothing.
+
+Modes:
+  - "sim"   : Drone via UDP (SITL), base from hardcoded coords.
+  - "ground": Drone via serial (/dev/ttyACM0) AND base GPS via serial (/dev/ttyUSB0).
+
+This version adds exponential smoothing to the relative bearing/elevation (`world_az`/`world_el`) to filter out noise and jitter.
+"""
 
 # ======= CHANGE THIS FLAG =======
 MODE = "ground"   # "sim" or "ground"
@@ -36,7 +45,7 @@ MAV_MSG_INTERVAL_US_GLOBAL = 200_000
 # Gear spokes → ratio
 SPOKES_SMALL = 12
 SPOKES_BIG   = 24
-GEAR_RATIO   = SPOKES_BIG / SPOKES_SMALL      # 2.0
+GEAR_RATIO   = SPOKES_BIG / SPOKES_SMALL      # == 2.0
 
 # Physical limits
 AZ_PHYS_MIN = 0.0
@@ -60,12 +69,11 @@ SERVO_AZ_PIN = 18
 SERVO_EL_PIN = 13
 
 # Loop timings
-UPDATE_PERIOD_S = 0.10   # 50 Hz
+UPDATE_PERIOD_S = 0.02   # 5 Hz
 PRINT_EVERY     = 1
 LOG_TO_CSV      = True
 
-# Startup pose is now forced to (0,0) servo
-STARTUP_AZ_WORLD = 0.0
+# Startup pose forced to (0,0) servo\STARTUP_AZ_WORLD = 0.0
 STARTUP_EL_WORLD = 0.0
 
 # Shared state (GROUND mode)
@@ -199,21 +207,21 @@ def log_close():
 def snapshot_ground() -> Optional[Tuple[Dict[str,float], Dict[str,float]]]:
     with _drone_lock: d = drone_gps.copy()
     with _base_lock:  b = base_gps.copy()
-    # Ensure both drone and base GPS have valid data
     if None in d.values() or None in b.values():
         return None
     return d, b
 
 def snapshot_sim() -> Optional[Tuple[Dict[str,float], Dict[str,float]]]:
     with _drone_lock: d = drone_gps.copy()
-    if None in (d.values()):
+    if None in d.values():
         return None
     b = {**base_static}
     return d, b
 
 # ===== Main =====
 def main():
-    print(f"[CONFIG] Mode: {MODE}, Gear {GEAR_RATIO}:1, Servo 180° over {PULSE_MIN_US}-{PULSE_MAX_US}µs")
+    print("=== geo_7 unified (sim/ground) with zero-ref + smoothing ===")
+    print(f"[CFG] Mode: {MODE}, Gear {GEAR_RATIO}:1, Servo 180° over {PULSE_MIN_US}-{PULSE_MAX_US}µs")
 
     pi = setup_pigpio()
     log_open()
@@ -237,7 +245,7 @@ def main():
     zero_world_az = None
     zero_world_el = None
     print("[INFO] Point the tracker at the drone and stabilize GPS.")
-    print("[INFO] Waiting 10 seconds for GPS Stabalization")
+    print("[INFO] Waiting 10 seconds for zero reference…")
     time.sleep(10)
     snap0 = snapshot_fn()
     if snap0:
@@ -256,10 +264,15 @@ def main():
         print("[WARN] Could not obtain initial GPS snapshot for zeroing.")
 
     # Park at servo (0,0)
-    print("Point the tracker towards the drone")
+    print("Parking the tracker to initial position. Make sure the tracker faces the drone.")
     pi.set_servo_pulsewidth(SERVO_AZ_PIN, servo_deg_to_us(0.0))
     pi.set_servo_pulsewidth(SERVO_EL_PIN, servo_deg_to_us(0.0))
-    time.sleep(5)
+    time.sleep(3)
+
+    # Prepare smoothing variables
+    smoothed_az = None
+    smoothed_el = None
+    alpha = 0.2  # smoothing factor: lower = more smoothing
 
     cycle = 0
     try:
@@ -272,6 +285,7 @@ def main():
                 time.sleep(0.2)
                 continue
             drone, base = snap
+
             info = tracker.get_tracking_info(
                 base['lat'], base['lon'], base['alt'],
                 drone['lat'], drone['lon'], drone['alt']
@@ -279,26 +293,35 @@ def main():
             if not info:
                 time.sleep(UPDATE_PERIOD_S)
                 continue
-            # compute relative angles
+
+            # Absolute bearing/elevation
             abs_az = info.get('adjusted_azimuth', info['azimuth'])
             abs_el = info.get('adjusted_elevation', info['elevation'])
+            # Relative world angle from zero reference
             world_az = norm360(abs_az - (zero_world_az or 0.0))
             world_el = abs_el - (zero_world_el or 0.0)
 
-            # apply calibration, clamp, gearing
-            cal_az, cal_el = apply_calibration(world_az, world_el)
-            phys_az, phys_el = world_to_physical(cal_az, cal_el)
-            s_az, s_el = physical_to_servo_deg(phys_az, phys_el)
+            # Low-pass smoothing
+            if smoothed_az is None:
+                smoothed_az, smoothed_el = world_az, world_el
+            else:
+                smoothed_az = (1-alpha)*smoothed_az + alpha*world_az
+                smoothed_el = (1-alpha)*smoothed_el + alpha*world_el
 
-            # drive servos
+            # Calibration → clamp → gearing
+            cal_az,   cal_el   = apply_calibration(smoothed_az, smoothed_el)
+            phys_az,  phys_el  = world_to_physical(cal_az, cal_el)
+            s_az,     s_el     = physical_to_servo_deg(phys_az, phys_el)
+
+            # Drive servos
             us_az = servo_deg_to_us(s_az)
             us_el = servo_deg_to_us(s_el)
             pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
             pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
 
-            # console output
+            # Console output
             if cycle % PRINT_EVERY == 0:
-                print(f"[{datetime.now():%H:%M:%S}] WORLD {world_az:6.2f}/{world_el:5.2f}°  "
+                print(f"[{datetime.now():%H:%M:%S}] WORLD smoothed {smoothed_az:6.2f}/{smoothed_el:5.2f}°  "
                       f"PHYS {phys_az:6.2f}/{phys_el:5.2f}°  "
                       f"SERVO {s_az:6.2f}/{s_el:6.2f}°  "
                       f"µs {us_az:5.0f}/{us_el:5.0f}")
@@ -306,7 +329,7 @@ def main():
             # CSV log
             log_row(
                 datetime.now().isoformat(timespec='seconds'),
-                round(world_az,3), round(world_el,3),
+                round(smoothed_az,3), round(smoothed_el,3),
                 round(cal_az,3), round(cal_el,3),
                 round(phys_az,3), round(phys_el,3),
                 round(s_az,3), round(s_el,3),

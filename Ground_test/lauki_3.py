@@ -41,7 +41,7 @@ SERVO_RANGE_DEG = 180.0
 # --- Calibration (world-frame) ---
 AZIMUTH_ZERO_OFFSET_DEG   = 0.0
 ELEVATION_ZERO_OFFSET_DEG = 0.0
-AZIMUTH_INVERT   = False
+AZIMUTH_INVERT   = True
 ELEVATION_INVERT = False
 
 # --- GPIO pins (BCM) ---
@@ -50,12 +50,12 @@ SERVO_EL_PIN = 13
 
 # --- Rates & filtering ---
 UPDATE_PERIOD_S = 0.05      # 20 Hz loop
-GPS_STALE_SEC   = 0.5       # drop samples older than 0.5 s
+GPS_STALE_SEC   = 1       # drop samples older than 0.5 s
 
 # --- Motion shaping ---
 MAX_AZ_SLEW_DPS = 180.0     # azimuth max speed (deg/sec)
 MAX_EL_SLEW_DPS = 120.0     # elevation max speed (deg/sec)
-BACKLASH_DEG    = 0.5       # small nudge on reversal (set 0.0 to disable)
+BACKLASH_DEG    = 0.0       # small nudge on reversal (set 0.0 to disable)
 
 # --- Logging / prints ---
 PRINT_EVERY = 1              # print every N cycles (1=20 Hz; try 4 for ~5 Hz)
