@@ -615,7 +615,7 @@ def main():
 
             # Console output (paced)
             if time.time() >= next_print:
-                print(f"[{datetime.now():%H:%M:%S}] Base={base_mode_str}{' 🔒' if base_locked else ''} "
+                print(f"[{datetime.now():%H:%M:%S}] Base={base_mode_str}{'Locked' if base_locked else ''} "
                       f"sd≈{base_sd_lat:.2f}/{base_sd_lon:.2f}m | "
                       f"WORLD {smoothed_az:6.2f}/{smoothed_el:5.2f}° | "
                       f"SERVO {s_az:6.2f}/{s_el:5.2f}° | µs {us_az:5.0f}/{us_el:5.0f}")
@@ -636,7 +636,6 @@ def main():
                 "" if base_fix is None else base_fix,
                 "" if base_sats is None else base_sats
             )
-
             time.sleep(args.update_period)
 
     except KeyboardInterrupt:
