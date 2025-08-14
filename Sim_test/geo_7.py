@@ -57,7 +57,7 @@ ELEVATION_INVERT = False
 
 # pigpio GPIO pins (BCM numbering)
 SERVO_AZ_PIN = 18
-SERVO_EL_PIN = 13
+SERVO_EL_PIN = 17
 
 # Loop timings
 UPDATE_PERIOD_S = 0.10   # 50 Hz

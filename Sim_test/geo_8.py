@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# Working code, pushed to main repo.
 """
 geo_7.py — unified tracker with lauki_2.py logic, zero-reference capture, and low-pass smoothing.
 
@@ -25,8 +25,8 @@ import azi_elev_5 as tracker
 # ===================== Configuration =====================
 
 base_static = {
-    "lat": 13.0276816,
-    "lon": 77.5630373,
+    "lat": 13.0278265,
+    "lon": 77.5631976,
     "alt": 931.13,          # metres ASL
 }
 
@@ -42,7 +42,7 @@ BASE_BAUD      = 57600
 MAV_MSG_INTERVAL_US_GPS    = 200_000
 MAV_MSG_INTERVAL_US_GLOBAL = 200_000
 
-# Gear spokes → ratio
+# Gear spokes  ratio
 SPOKES_SMALL = 12
 SPOKES_BIG   = 24
 GEAR_RATIO   = SPOKES_BIG / SPOKES_SMALL      # == 2.0
@@ -66,7 +66,7 @@ ELEVATION_INVERT = False
 
 # pigpio GPIO pins (BCM numbering)
 SERVO_AZ_PIN = 18
-SERVO_EL_PIN = 13
+SERVO_EL_PIN = 17
 
 # Loop timings
 UPDATE_PERIOD_S = 0.02   # 5 Hz
