@@ -78,8 +78,8 @@ LOG_RAW_GPS     = True   # per-message GPS capture (for precision analysis)
 
 # SIM base (used only in SIM mode)
 base_static = {
-    "lat": 13.0276816,
-    "lon": 77.5630373,
+    "lat": 13.0272255,
+    "lon": 77.5630997,
     "alt": 931.13,          # metres ASL
 }
 
