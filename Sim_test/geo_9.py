@@ -1,19 +1,3 @@
-#!/usr/bin/env python3
-"""
-geo_8.py — unified tracker with:
-  • Modes: "sim" (SITL) or "ground" (USB Pixhawk + USB base GPS)
-  • Base position modes (GROUND only):
-      - dynamic: use live base GPS with rolling median filter
-      - static : auto-snapshot base once stabilized, then hold fixed
-  • Zero-reference capture (initial point-at-drone) + exponential smoothing
-  • Rich CSV logging (+ optional raw GPS logging)
-
-Why this helps your close-proximity tests:
-  - "static" base mode mitigates short-range drift by locking the base coordinates
-  - "dynamic" still uses two live streams but filters base jitter via a rolling median
-  - Raw GPS logging lets you compare/diagnose stream precision later
-"""
-
 import argparse
 import time
 from collections import deque
@@ -21,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import math
 import threading
-from typing import Optional, Dict, Tuple, Callable
+from typing import Optional, Tuple, Callable
 
 import pigpio
 from pymavlink import mavutil
@@ -44,10 +28,11 @@ BASE_BAUD          = 57600
 MAV_MSG_INTERVAL_US_GPS    = 200_000
 MAV_MSG_INTERVAL_US_GLOBAL = 200_000
 
-# Gear spokes → ratio
-SPOKES_SMALL = 12
-SPOKES_BIG   = 24
-GEAR_RATIO   = SPOKES_BIG / SPOKES_SMALL      # == 2.0
+# Gear spokes → ratios
+SPOKES_SMALL   = 12
+SPOKES_BIG     = 24
+AZ_GEAR_RATIO  = SPOKES_BIG / SPOKES_SMALL    # default 2.0
+EL_GEAR_RATIO  = SPOKES_BIG / SPOKES_SMALL    # default 2.0
 
 # Physical limits
 AZ_PHYS_MIN = 0.0
@@ -64,11 +49,11 @@ SERVO_RANGE_DEG = 180.0
 AZIMUTH_ZERO_OFFSET_DEG   = 0.0
 ELEVATION_ZERO_OFFSET_DEG = 0.0
 AZIMUTH_INVERT   = True
-ELEVATION_INVERT = False
+ELEVATION_INVERT = True  # set True if your rig needs "up is up"
 
 # pigpio GPIO pins (BCM numbering)
 SERVO_AZ_PIN = 18
-SERVO_EL_PIN = 17
+SERVO_EL_PIN = 17  # per your hardware
 
 # Loop timings
 UPDATE_PERIOD_S = 0.10   # 10 Hz default (set higher if your servos prefer slower updates)
@@ -78,8 +63,8 @@ LOG_RAW_GPS     = True   # per-message GPS capture (for precision analysis)
 
 # SIM base (used only in SIM mode)
 base_static = {
-    "lat": 13.0272255,
-    "lon": 77.5630997,
+    "lat": 13.0276802,
+    "lon": 77.5631332,
     "alt": 931.13,          # metres ASL
 }
 
@@ -102,8 +87,8 @@ def world_to_physical(az: float, el: float) -> Tuple[float, float]:
             max(EL_PHYS_MIN, min(EL_PHYS_MAX, el)))
 
 def physical_to_servo_deg(az_phys: float, el_phys: float) -> Tuple[float, float]:
-    az_raw = az_phys / GEAR_RATIO
-    el_raw = el_phys / GEAR_RATIO
+    az_raw = az_phys / AZ_GEAR_RATIO
+    el_raw = el_phys / EL_GEAR_RATIO
     az_servo = max(0.0, min(SERVO_RANGE_DEG, az_raw))
     el_servo = max(0.0, min(SERVO_RANGE_DEG, el_raw))
     return az_servo, el_servo
@@ -180,7 +165,7 @@ class GpsBuffer:
             last = self._buf[-1] if self._buf else None
             return last, tuple(self._buf)
 
-# ============= pigpio =============
+# ============= pigpio & Smooth Parking =============
 def setup_pigpio():
     pi = pigpio.pi()
     if not pi.connected:
@@ -189,6 +174,36 @@ def setup_pigpio():
     pi.set_mode(SERVO_EL_PIN, pigpio.OUTPUT)
     print(f"[INFO] pigpio ready (AZ={SERVO_AZ_PIN}, EL={SERVO_EL_PIN})")
     return pi
+
+def _bounded_us(x: float) -> float:
+    return max(500.0, min(2500.0, x))
+
+def _get_start_us(pi, pin: int, default_us: float = 1500.0) -> float:
+    try:
+        val = float(pi.get_servo_pulsewidth(pin))
+        if 500.0 <= val <= 2500.0:
+            return val
+    except Exception:
+        pass
+    return default_us
+
+def smooth_park(pi, target_servo_deg_az: float, target_servo_deg_el: float,
+                duration_s: float = 1.5, rate_hz: float = 60.0):
+    """Ramp both servos smoothly to target servo degrees over duration_s."""
+    target_us_az = servo_deg_to_us(max(0.0, min(SERVO_RANGE_DEG, target_servo_deg_az)))
+    target_us_el = servo_deg_to_us(max(0.0, min(SERVO_RANGE_DEG, target_servo_deg_el)))
+
+    start_us_az = _get_start_us(pi, SERVO_AZ_PIN, default_us=1500.0)
+    start_us_el = _get_start_us(pi, SERVO_EL_PIN, default_us=1500.0)
+
+    steps = max(1, int(duration_s * rate_hz))
+    for i in range(1, steps + 1):
+        a = i / steps
+        us_az = _bounded_us(start_us_az + (target_us_az - start_us_az) * a)
+        us_el = _bounded_us(start_us_el + (target_us_el - start_us_el) * a)
+        pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
+        pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
+        time.sleep(1.0 / rate_hz)
 
 # ============= MAVLink I/O =============
 def connect_mav(endpoint: str, baud: Optional[int], hb_required: bool) -> mavutil.mavfile:
@@ -379,7 +394,7 @@ def dynamic_base_filtered(base_buf: GpsBuffer,
 # ============= Main =============
 
 def main():
-    ap = argparse.ArgumentParser(description="Unified antenna tracker with static/dynamic base modes")
+    ap = argparse.ArgumentParser(description="Unified antenna tracker with static/dynamic base modes + smooth parking")
     ap.add_argument("--mode", choices=["sim","ground"], default=MODE_DEFAULT,
                     help="Run mode: SITL 'sim' or hardware 'ground' (default: ground)")
 
@@ -404,11 +419,50 @@ def main():
     ap.add_argument("--update-period", type=float, default=UPDATE_PERIOD_S,
                     help="Main loop period seconds (servo update rate)")
 
+    # Parking & overrides
+    ap.add_argument("--park-home-az", type=float, default=0.0,
+                    help="Home azimuth (deg) for parking (default 0)")
+    ap.add_argument("--park-home-el", type=float, default=90.0,
+                    help="Home elevation (deg) for parking (default 90)")
+    ap.add_argument("--park-face-drone-start", action="store_true",
+                    help="On startup, park facing current drone azimuth (EL=home)")
+    ap.add_argument("--park-face-drone-exit", action="store_true",
+                    help="On shutdown, park facing current drone azimuth (EL=home)")
+    ap.add_argument("--park-duration", type=float, default=1.5,
+                    help="Seconds for smooth parking at init/cleanup")
+    ap.add_argument("--park-rate-hz", type=float, default=60.0,
+                    help="Update rate for smooth parking")
+
+    ap.add_argument("--az-gear-ratio", dest="az_gear_ratio", type=float, default=None,
+                    help="Override AZ gear ratio (default 2.0)")
+    ap.add_argument("--el-gear-ratio", dest="el_gear_ratio", type=float, default=None,
+                    help="Override EL gear ratio (default 2.0)")
+    ap.add_argument("--servo-min-us", dest="servo_min_us", type=float, default=None,
+                    help="Override servo min pulse (µs), e.g., 900")
+    ap.add_argument("--servo-max-us", dest="servo_max_us", type=float, default=None,
+                    help="Override servo max pulse (µs), e.g., 1200")
+
     args = ap.parse_args()
 
-    print("=== geo_8 unified (sim/ground) with base dynamic/static, zero-ref + smoothing ===")
-    print(f"[CFG] Mode: {args.mode} | BaseMode: {args.base_mode} | Gear {GEAR_RATIO}:1 | Servo 180° @ {PULSE_MIN_US}-{PULSE_MAX_US}µs")
+    # Apply optional overrides
+    global AZ_GEAR_RATIO, EL_GEAR_RATIO, PULSE_MIN_US, PULSE_MAX_US
+    if args.az_gear_ratio is not None:
+        AZ_GEAR_RATIO = float(args.az_gear_ratio)
+    if args.el_gear_ratio is not None:
+        EL_GEAR_RATIO = float(args.el_gear_ratio)
+    if args.servo_min_us is not None:
+        PULSE_MIN_US = float(args.servo_min_us)
+    if args.servo_max_us is not None:
+        PULSE_MAX_US = float(args.servo_max_us)
+
+    print("=== geo_8 unified (sim/ground) with base dynamic/static, zero-ref + smoothing + smooth parking ===")
+    print(f"[CFG] Mode: {args.mode} | BaseMode: {args.base_mode} | "
+          f"Gear AZ {AZ_GEAR_RATIO}:1, EL {EL_GEAR_RATIO}:1 | "
+          f"Servo 180° @ {PULSE_MIN_US}-{PULSE_MAX_US}µs")
     print(f"[CFG] update_period={args.update_period:.2f}s, print_period={args.print_period:.1f}s, alpha={args.alpha}")
+    print(f"[CFG] parking: home=({args.park_home_az:.1f}°, {args.park_home_el:.1f}°) "
+          f"face_drone(start={args.park_face_drone_start}, exit={args.park_face_drone_exit}) "
+          f"duration={args.park_duration:.2f}s @ {args.park_rate_hz:.0f} Hz")
 
     pi = setup_pigpio()
     log_open(prefix="Tracker")
@@ -460,11 +514,23 @@ def main():
     else:
         print("[WARN] Could not obtain initial GPS snapshot for zeroing. Proceeding with zero=(0,0).")
 
-    # Park at servo (0,0) to start
-    print("[INFO] Parking the tracker to initial position.")
-    pi.set_servo_pulsewidth(SERVO_AZ_PIN, servo_deg_to_us(0.0))
-    pi.set_servo_pulsewidth(SERVO_EL_PIN, servo_deg_to_us(0.0))
-    time.sleep(2.0)
+    # Smoothly park to initial position
+    print("[INFO] Smoothly parking the tracker to initial position…")
+    if args.park_face_drone_start and d0 and b0:
+        info_init = tracker.get_tracking_info(b0.lat, b0.lon, b0.alt, d0.lat, d0.lon, d0.alt)
+        if info_init:
+            abs_az0 = info_init.get("adjusted_azimuth", info_init["azimuth"])
+            # EL = home (e.g., horizon)
+            world_az0, world_el0 = norm360(abs_az0), args.park_home_el
+            cal_az0, cal_el0 = apply_calibration(world_az0, world_el0)
+            phys_az0, phys_el0 = world_to_physical(cal_az0, cal_el0)
+            s_az0, s_el0 = physical_to_servo_deg(phys_az0, phys_el0)
+            smooth_park(pi, s_az0, s_el0, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
+    else:
+        cal_az0, cal_el0 = apply_calibration(args.park_home_az, args.park_home_el)
+        phys_az0, phys_el0 = world_to_physical(cal_az0, cal_el0)
+        s_az0, s_el0 = physical_to_servo_deg(phys_az0, phys_el0)
+        smooth_park(pi, s_az0, s_el0, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
 
     # ===== Base mode management (GROUND only) =====
     base_state: Optional[BaseState] = None
@@ -484,6 +550,8 @@ def main():
     smoothed_el = None
     alpha = max(0.0, min(1.0, args.alpha))
     next_print = time.time()
+    last_servo_az = 0.0
+    last_servo_el = 0.0
 
     try:
         while True:
@@ -543,10 +611,11 @@ def main():
             # Drive servos
             pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
             pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
+            last_servo_az, last_servo_el = s_az, s_el
 
             # Console output (paced)
             if time.time() >= next_print:
-                print(f"[{datetime.now():%H:%M:%S}] Base={base_mode_str}{'GPS locked' if base_locked else ''} "
+                print(f"[{datetime.now():%H:%M:%S}] Base={base_mode_str}{' 🔒' if base_locked else ''} "
                       f"sd≈{base_sd_lat:.2f}/{base_sd_lon:.2f}m | "
                       f"WORLD {smoothed_az:6.2f}/{smoothed_el:5.2f}° | "
                       f"SERVO {s_az:6.2f}/{s_el:5.2f}° | µs {us_az:5.0f}/{us_el:5.0f}")
@@ -573,12 +642,24 @@ def main():
     except KeyboardInterrupt:
         print("\n[INFO] Stopped by user")
     finally:
+        print("[INFO] Smooth shutdown: parking…")
         try:
-            pi.set_servo_pulsewidth(SERVO_AZ_PIN, servo_deg_to_us(0.0))
-            pi.set_servo_pulsewidth(SERVO_EL_PIN, servo_deg_to_us(0.0))
+            if args.park_face_drone_exit:
+                # Keep current AZ (last_servo_az), ramp EL → home
+                cal_azH, cal_elH = apply_calibration(0.0, args.park_home_el)
+                phys_azH, phys_elH = world_to_physical(cal_azH, cal_elH)
+                s_azH = last_servo_az
+                s_elH = physical_to_servo_deg(phys_azH, phys_elH)[1]
+                smooth_park(pi, s_azH, s_elH, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
+            else:
+                cal_azH, cal_elH = apply_calibration(args.park_home_az, args.park_home_el)
+                phys_azH, phys_elH = world_to_physical(cal_azH, cal_elH)
+                s_azH, s_elH = physical_to_servo_deg(phys_azH, phys_elH)
+                smooth_park(pi, s_azH, s_elH, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
+
             time.sleep(0.2)
             pi.set_servo_pulsewidth(SERVO_AZ_PIN, 0)
-            pi.set_servo_pulsewidth(SERVO_EL_PIN, 0)
+            pi.set_servo_pulsewidth(SERVO_EL_PIN, 90)
             pi.stop()
         except Exception as e:
             print(f"[WARN] pigpio cleanup: {e}")
