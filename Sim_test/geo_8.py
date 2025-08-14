@@ -10,7 +10,7 @@ This version adds exponential smoothing to the relative bearing/elevation (`worl
 """
 
 # ======= CHANGE THIS FLAG =======
-MODE = "ground"   # "sim" or "ground"
+MODE = "sim"   # "sim" or "ground"
 # ================================
 
 import time
