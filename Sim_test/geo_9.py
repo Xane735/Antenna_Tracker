@@ -456,7 +456,6 @@ def main():
                     help="Seconds for smooth parking at init/cleanup")
     ap.add_argument("--park-rate-hz", type=float, default=60.0,
                     help="Update rate for smooth parking")
-
     ap.add_argument("--az-gear-ratio", dest="az_gear_ratio", type=float, default=None,
                     help="Override AZ gear ratio (default 2.0)")
     ap.add_argument("--el-gear-ratio", dest="el_gear_ratio", type=float, default=None,
