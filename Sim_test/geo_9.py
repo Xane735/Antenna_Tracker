@@ -14,7 +14,7 @@ import azi_elev_5 as tracker
 # ===================== Defaults (overridable by CLI) =====================
 
 MODE_DEFAULT = "ground"      # "sim" or "ground"
-BASE_MODE_DEFAULT = "dynamic"  # "dynamic" or "static"   (only used in ground mode)
+BASE_MODE_DEFAULT = "staticc"  # "dynamic" or "static"   (only used in ground mode)
 
 # --- Endpoints ---
 SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14551"
@@ -87,8 +87,8 @@ def world_el_to_us(world_el_deg: float) -> int:
 
 # SIM base (used only in SIM mode)
 base_static = {
-    "lat": 13.0268329,
-    "lon": 77.5632566,
+    "lat": 13.0281865,
+    "lon": 77.5675790,
     "alt": 931.13,          # metres ASL
 }
 
@@ -509,7 +509,7 @@ def main():
     zero_world_el = None
     print("[INFO] Point the tracker at the drone and stabilize GPS.")
     print("[INFO] Waiting 10 seconds for zero reference…")
-    time.sleep(10.0)
+    #time.sleep(10.0)
 
     # We need one snapshot of both drone and base for zeroing
     def get_zero_snapshot():
