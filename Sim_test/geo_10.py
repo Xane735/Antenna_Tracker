@@ -6,21 +6,21 @@ from datetime import datetime
 import math
 import threading
 from typing import Optional, Tuple, Callable
-
+import log
 import pigpio
 from pymavlink import mavutil
 import azi_elev_5 as tracker
 
 # ===================== Defaults (overridable by CLI) =====================
 
-MODE_DEFAULT = "ground"         # "sim" or "ground"
-BASE_MODE_DEFAULT = "static"   # "dynamic" or "static"   (only used in ground mode)
+MODE_DEFAULT = "ground"      # "sim" or "ground"
+BASE_MODE_DEFAULT = "static"  # "dynamic" or "static"   (only used in ground mode)
 
 # --- Endpoints ---
 SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14550"
 SIM_DRONE_BAUD     = None
 DRONE_ENDPOINT     = "/dev/ttyACM0"
-DRONE_BAUD         = 57600
+DRONE_BAUD         = 115200
 BASE_ENDPOINT      = "/dev/ttyUSB0"
 BASE_BAUD          = 57600
 
@@ -211,8 +211,7 @@ def _get_start_us(pi, pin: int, default_us: float = 1500.0) -> float:
         pass
     return default_us
 
-def smooth_park(pi, target_servo_deg_az: float, target_servo_deg_el: float,
-                duration_s: float = 1.5, rate_hz: float = 60.0):
+def smooth_park(pi, target_servo_deg_az: float, target_servo_deg_el: float, duration_s: float = 1.5, rate_hz: float = 60.0):
     """Ramp both servos smoothly to target servo degrees over duration_s."""
     target_us_az = servo_deg_to_us(max(0.0, min(SERVO_RANGE_DEG, target_servo_deg_az)))
     target_us_el = servo_deg_to_us(max(0.0, min(SERVO_RANGE_DEG, target_servo_deg_el)))
@@ -267,59 +266,6 @@ def start_reader(mav: mavutil.mavfile, buf: GpsBuffer, on_raw: Optional[Callable
     th = threading.Thread(target=_run, daemon=True)
     th.start()
     return th
-
-# ============= CSV logging =============
-_log_writer = None
-_log_file   = None
-_raw_writer = None
-_raw_file   = None
-
-def log_open(prefix="Tracker"):
-    global _log_writer, _log_file, _raw_writer, _raw_file
-    if not LOG_TO_CSV and not LOG_RAW_GPS:
-        return
-    import csv, pathlib
-    pathlib.Path("Tracker_Logs").mkdir(exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    if LOG_TO_CSV:
-        fn = pathlib.Path(f"Tracker_Logs/{prefix}_{ts}.csv")
-        _log_file = fn.open("w", newline="")
-        _log_writer = csv.writer(_log_file)
-        _log_writer.writerow([
-            "Time",
-            "BaseMode","BaseLocked",
-            "WorldAz","WorldEl","CalAz","CalEl",
-            "PhysAz","PhysEl","ServoAz","ServoEl","Az(us)","El(us)",
-            "DroneLat","DroneLon","DroneAlt",
-            "BaseLat","BaseLon","BaseAlt",
-            "BaseLatSDm","BaseLonSDm","BaseFix","BaseSats"
-        ])
-        print(f"[INFO] CSV log → {fn}")
-    if LOG_RAW_GPS:
-        fnr = pathlib.Path(f"Tracker_Logs/{prefix}_RAW_{ts}.csv")
-        _raw_file = fnr.open("w", newline="")
-        _raw_writer = csv.writer(_raw_file)
-        _raw_writer.writerow(["Time","Stream","Lat","Lon","Alt","eph(m)","epv(m)","fix_type","sats"])
-        print(f"[INFO] RAW GPS log → {fnr}")
-
-def log_row(*row):
-    if _log_writer:
-        _log_writer.writerow(row)
-        _log_file.flush()
-
-def log_raw(stream: str, s: GpsSample):
-    if _raw_writer:
-        _raw_writer.writerow([datetime.now().isoformat(timespec='seconds'),
-                              stream, f"{s.lat:.7f}", f"{s.lon:.7f}", f"{s.alt:.2f}",
-                              "" if s.eph is None else f"{s.eph:.2f}",
-                              "" if s.epv is None else f"{s.epv:.2f}",
-                              "" if s.fix_type is None else s.fix_type,
-                              "" if s.sats is None else s.sats])
-        _raw_file.flush()
-
-def log_close():
-    if _log_file: _log_file.close()
-    if _raw_file: _raw_file.close()
 
 # ============= Base filters & stabilizer =============
 
@@ -488,7 +434,6 @@ def main():
           f"duration={args.park_duration:.2f}s @ {args.park_rate_hz:.0f} Hz")
 
     pi = setup_pigpio()
-    log_open(prefix="Tracker")
 
     # Prepare buffers and readers
     drone_buf = GpsBuffer("drone", maxlen=300)
@@ -509,7 +454,7 @@ def main():
     zero_world_el = None
     print("[INFO] Point the tracker at the drone and stabilize GPS.")
     print("[INFO] Waiting 10 seconds for zero reference…")
-    time.sleep(20.0)
+    time.sleep(10.0)
 
     # We need one snapshot of both drone and base for zeroing
     def get_zero_snapshot():
@@ -685,7 +630,7 @@ def main():
             pi.stop()
         except Exception as e:
             print(f"[WARN] pigpio cleanup: {e}")
-        log_close()
+        log_close(
 
 if __name__ == "__main__":
     main()

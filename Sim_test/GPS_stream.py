@@ -22,8 +22,8 @@ def read_gps(name, port, baud):
 
 # Configure ports
 gps_sources = [
-    ("USB_Pixhawk", "/dev/ttyACM0", 57600),     # or /dev/ttyAMA0 or /dev/serial0
-    ("Telemetry", "/dev/ttyUSB0", 57600)         # telemetry port
+    ("USB_Pixhawk", "/dev/ttyACM0", 115200),     # or /dev/ttyAMA0 or /dev/serial0
+    ("Telemetry", "/dev/ttyACM1", 115200)         # telemetry port
 ]
 
 # Start each GPS reader in its own thread
