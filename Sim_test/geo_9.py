@@ -17,7 +17,7 @@ MODE_DEFAULT = "ground"      # "sim" or "ground"
 BASE_MODE_DEFAULT = "staticc"  # "dynamic" or "static"   (only used in ground mode)
 
 # --- Endpoints ---
-SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14551"
+SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14550"
 SIM_DRONE_BAUD     = None
 DRONE_ENDPOINT     = "/dev/ttyACM0"
 DRONE_BAUD         = 115200
@@ -140,7 +140,7 @@ class GpsSample:
     fix_type: Optional[int] = None  # 0..6 (3=3D fix)
     sats: Optional[int] = None
 
-def _extract_sample(msg) -> Optional[GpsSample]:
+def _extract_sample(msg) -> Optional[GpsSample]:  #Optional[]-> Might not might not return a value
     t = time.time()
     tp = msg.get_type()
     if tp == "GPS_RAW_INT":
