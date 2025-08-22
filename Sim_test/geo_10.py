@@ -6,139 +6,14 @@ from datetime import datetime
 import math
 import threading
 from typing import Optional, Tuple, Callable
-import log
+import CONFIG as C
 import pigpio
 from pymavlink import mavutil
 import azi_elev_5 as tracker
-
-# ===================== Defaults (overridable by CLI) =====================
-
-MODE_DEFAULT = "ground"      # "sim" or "ground"
-BASE_MODE_DEFAULT = "static"  # "dynamic" or "static"   (only used in ground mode)
-
-# --- Endpoints ---
-SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14550"
-SIM_DRONE_BAUD     = None
-DRONE_ENDPOINT     = "/dev/ttyACM0"
-DRONE_BAUD         = 115200
-BASE_ENDPOINT      = "/dev/ttyUSB0"
-BASE_BAUD          = 57600
-
-# MAVLink stream requests (~5 Hz)
-MAV_MSG_INTERVAL_US_GPS    = 200_000
-MAV_MSG_INTERVAL_US_GLOBAL = 200_000
-
-# Gear spokes → ratios
-SPOKES_SMALL   = 12
-SPOKES_BIG     = 24
-AZ_GEAR_RATIO  = SPOKES_BIG / SPOKES_SMALL    # default 2.0
-EL_GEAR_RATIO  = SPOKES_BIG / SPOKES_SMALL    # default 2.0
-
-# Physical limits
-AZ_PHYS_MIN = 0.0
-AZ_PHYS_MAX = 350.0
-EL_PHYS_MIN = 0.0
-EL_PHYS_MAX = 180.0
-
-# Servo mapping — 180° servo
-PULSE_MIN_US    = 900.0
-PULSE_MAX_US    = 2100.0
-SERVO_RANGE_DEG = 180.0
-
-# Calibration
-AZIMUTH_ZERO_OFFSET_DEG   = 0.0
-ELEVATION_ZERO_OFFSET_DEG = 90.0
-AZIMUTH_INVERT   = True
-ELEVATION_INVERT = False  # set True if your rig needs "up is up"
-
-# pigpio GPIO pins (BCM numbering)
-SERVO_AZ_PIN = 18
-SERVO_EL_PIN = 17  # per your hardware
-
-# Loop timings
-UPDATE_PERIOD_S = 0.10   # 10 Hz default (set higher if your servos prefer slower updates)
-PRINT_PERIOD_S  = 1.0
-LOG_TO_CSV      = True
-LOG_RAW_GPS     = True   # per-message GPS capture (for precision analysis)
-
-EL_MIN_WORLD_DEG = 0.0
-EL_MAX_WORLD_DEG = 90.0
-
-def _clamp(x, lo, hi):
-    return lo if x < lo else hi if x > hi else x
-
-EL_US_MIN, EL_US_MAX = 900.0, 2100.0
-US_PER_SERVO_DEG = (EL_US_MAX - EL_US_MIN) / 180.0   # 6.666... µs/deg
-
-def world_el_to_us(world_el_deg: float) -> int:
-    # clamp to 0..90 so you never drive below horizon or beyond straight up
-    w = _clamp(world_el_deg, EL_MIN_WORLD_DEG, EL_MAX_WORLD_DEG)
-
-    # mapping for your 2:1 gear and 1500 µs (servo 90°) = sky:
-    # world_el: 0→horizon, +90→sky
-    # servo_deg = (world_el + 90)/2
-    servo_deg = (w + 90.0) / 2.0
-
-    us = 1500.0 + (servo_deg - 90.0) * US_PER_SERVO_DEG
-    # final safety clamp to mechanical µs range
-    if us < EL_US_MIN: us = EL_US_MIN
-    if us > EL_US_MAX: us = EL_US_MAX
-    return int(us)
-
-# SIM base (used only in SIM mode)
-base_static = {
-    "lat": 13.0281865,
-    "lon": 77.5675790,
-    "alt": 931.13,          # metres ASL
-}
-
-# ============= Helpers & Small Utilities =============
-
-def norm360(x: float) -> float:
-    return (x + 360.0) % 360.0
-
-def apply_calibration(az: float, el: float) -> Tuple[float, float]:
-    az = norm360(az + AZIMUTH_ZERO_OFFSET_DEG)
-    el += ELEVATION_ZERO_OFFSET_DEG
-    if AZIMUTH_INVERT:
-        az = norm360(360.0 - az)
-    if ELEVATION_INVERT:
-        el = -el
-    return az, el
-
-def world_to_physical(az: float, el: float) -> Tuple[float, float]:
-    return (max(AZ_PHYS_MIN, min(AZ_PHYS_MAX, az)),
-            max(EL_PHYS_MIN, min(EL_PHYS_MAX, el)))
-
-def physical_to_servo_deg(az_phys: float, el_phys: float) -> Tuple[float, float]:
-    az_raw = az_phys / AZ_GEAR_RATIO
-    el_raw = el_phys / EL_GEAR_RATIO
-    az_servo = max(0.0, min(SERVO_RANGE_DEG, az_raw))
-    el_servo = max(0.0, min(SERVO_RANGE_DEG, el_raw))
-    return az_servo, el_servo
-
-def servo_deg_to_us(deg: float) -> float:
-    deg = max(0.0, min(SERVO_RANGE_DEG, deg))
-    return PULSE_MIN_US + (deg / SERVO_RANGE_DEG) * (PULSE_MAX_US - PULSE_MIN_US)
-
-# Quick deg→meters conversion (approx), good enough for stability heuristics
-def latlon_to_meters(lat_deg: float, lon_deg: float, ref_lat_deg: float) -> Tuple[float,float]:
-    lat_m = lat_deg * 111_320.0
-    lon_m = lon_deg * 111_320.0 * math.cos(math.radians(ref_lat_deg))
-    return lat_m, lon_m
+import HELPER_FUNCTIONS as UTL
+from tracker_logger import (GpsSample, log_open, log_row, log_close,create_raw_logger, set_logging_config)
 
 # ============= Thread-safe GPS sample stores =============
-
-@dataclass
-class GpsSample:
-    t: float
-    lat: float
-    lon: float
-    alt: float
-    eph: Optional[float] = None     # horizontal accuracy (m) if available
-    epv: Optional[float] = None     # vertical accuracy (m) if available
-    fix_type: Optional[int] = None  # 0..6 (3=3D fix)
-    sats: Optional[int] = None
 
 def _extract_sample(msg) -> Optional[GpsSample]:  #Optional[]-> Might not might not return a value
     t = time.time()
@@ -194,9 +69,9 @@ def setup_pigpio():
     pi = pigpio.pi()
     if not pi.connected:
         raise RuntimeError("pigpio daemon not running (sudo pigpiod)")
-    pi.set_mode(SERVO_AZ_PIN, pigpio.OUTPUT)
-    pi.set_mode(SERVO_EL_PIN, pigpio.OUTPUT)
-    print(f"[INFO] pigpio ready (AZ={SERVO_AZ_PIN}, EL={SERVO_EL_PIN})")
+    pi.set_mode(C.SERVO_AZ_PIN, pigpio.OUTPUT)
+    pi.set_mode(C.SERVO_EL_PIN, pigpio.OUTPUT)
+    print(f"[INFO] pigpio ready (AZ={C.SERVO_AZ_PIN}, EL={C.SERVO_EL_PIN})")
     return pi
 
 def _bounded_us(x: float) -> float:
@@ -211,21 +86,22 @@ def _get_start_us(pi, pin: int, default_us: float = 1500.0) -> float:
         pass
     return default_us
 
-def smooth_park(pi, target_servo_deg_az: float, target_servo_deg_el: float, duration_s: float = 1.5, rate_hz: float = 60.0):
+def smooth_park(pi, target_servo_deg_az: float, target_servo_deg_el: float,
+                duration_s: float = 1.5, rate_hz: float = 60.0):
     """Ramp both servos smoothly to target servo degrees over duration_s."""
-    target_us_az = servo_deg_to_us(max(0.0, min(SERVO_RANGE_DEG, target_servo_deg_az)))
-    target_us_el = servo_deg_to_us(max(0.0, min(SERVO_RANGE_DEG, target_servo_deg_el)))
+    target_us_az = UTL.servo_deg_to_us(max(0.0, min(C.SERVO_RANGE_DEG, target_servo_deg_az)))
+    target_us_el = UTL.servo_deg_to_us(max(0.0, min(C.SERVO_RANGE_DEG, target_servo_deg_el)))
 
-    start_us_az = _get_start_us(pi, SERVO_AZ_PIN, default_us=1500.0)
-    start_us_el = _get_start_us(pi, SERVO_EL_PIN, default_us=1500.0)
+    start_us_az = _get_start_us(pi, C.SERVO_AZ_PIN, default_us=1500.0)
+    start_us_el = _get_start_us(pi, C.SERVO_EL_PIN, default_us=1500.0)
 
     steps = max(1, int(duration_s * rate_hz))
     for i in range(1, steps + 1):
         a = i / steps
         us_az = _bounded_us(start_us_az + (target_us_az - start_us_az) * a)
         us_el = _bounded_us(start_us_el + (target_us_el - start_us_el) * a)
-        pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
-        pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
+        pi.set_servo_pulsewidth(C.SERVO_AZ_PIN, us_az)
+        pi.set_servo_pulsewidth(C.SERVO_EL_PIN, us_el)
         time.sleep(1.0 / rate_hz)
 
 # ============= MAVLink I/O =============
@@ -237,10 +113,10 @@ def connect_mav(endpoint: str, baud: Optional[int], hb_required: bool) -> mavuti
     except Exception as e:
         if hb_required:
             raise
-        print(f"[MAV] No heartbeat on {endpoint} – continuing: {e}")
+        print(f"[MAV] No heartbeat on {endpoint} - continuing: {e}")
     for msg_id, interval in (
-        (mavutil.mavlink.MAVLINK_MSG_ID_GPS_RAW_INT,    MAV_MSG_INTERVAL_US_GPS),
-        (mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, MAV_MSG_INTERVAL_US_GLOBAL),
+        (mavutil.mavlink.MAVLINK_MSG_ID_GPS_RAW_INT, C.MAV_MSG_INTERVAL_US_GPS),
+        (mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, C.MAV_MSG_INTERVAL_US_GLOBAL),
     ):
         try:
             mav.mav.command_long_send(
@@ -316,7 +192,7 @@ def stabilize_base(base_buf: GpsBuffer,
                 lat_m = []
                 lon_m = []
                 for s in win:
-                    lm, Lm = latlon_to_meters(s.lat - ref_lat, s.lon - win[-1].lon, ref_lat)
+                    lm, Lm = UTL.latlon_to_meters(s.lat - ref_lat, s.lon - win[-1].lon, ref_lat)
                     lat_m.append(lm)
                     lon_m.append(Lm)
                 sd_lat = compute_sd(lat_m)
@@ -352,8 +228,8 @@ def dynamic_base_filtered(base_buf: GpsBuffer,
     lon = rolling_median(lon_vals)
     alt = rolling_median(alt_vals)
     # compute SD in meters for logging insight
-    lat_m = [latlon_to_meters(s - ref_lat, 0.0, ref_lat)[0] for s in lat_vals]
-    lon_m = [latlon_to_meters(0.0, s - lon_vals[-1], ref_lat)[1] for s in lon_vals]
+    lat_m = [UTL.latlon_to_meters(s - ref_lat, 0.0, ref_lat)[0] for s in lat_vals]
+    lon_m = [UTL.latlon_to_meters(0.0, s - lon_vals[-1], ref_lat)[1] for s in lon_vals]
     return BaseState(
         mode="dynamic", locked=False,
         lat=lat, lon=lon, alt=alt,
@@ -365,10 +241,10 @@ def dynamic_base_filtered(base_buf: GpsBuffer,
 
 def main():
     ap = argparse.ArgumentParser(description="Unified antenna tracker with static/dynamic base modes + smooth parking")
-    ap.add_argument("--mode", choices=["sim","ground"], default=MODE_DEFAULT,
+    ap.add_argument("--mode", choices=["sim","ground"], default=C.MODE_DEFAULT,
                     help="Run mode: SITL 'sim' or hardware 'ground' (default: ground)")
 
-    ap.add_argument("--base-mode", choices=["dynamic","static"], default=BASE_MODE_DEFAULT,
+    ap.add_argument("--base-mode", choices=["dynamic","static"], default=C.BASE_MODE_DEFAULT,
                     help="Base position mode for 'ground': dynamic (filtered live) or static (auto-lock)")
 
     ap.add_argument("--static-window-sec", type=float, default=10.0,
@@ -383,10 +259,10 @@ def main():
     ap.add_argument("--alpha", type=float, default=0.2,
                     help="Exponential smoothing factor for world az/el (0..1)")
 
-    ap.add_argument("--print-period", type=float, default=PRINT_PERIOD_S,
+    ap.add_argument("--print-period", type=float, default=C.PRINT_PERIOD_S,
                     help="Seconds between console prints")
 
-    ap.add_argument("--update-period", type=float, default=UPDATE_PERIOD_S,
+    ap.add_argument("--update-period", type=float, default=C.UPDATE_PERIOD_S,
                     help="Main loop period seconds (servo update rate)")
 
     # Parking & overrides
@@ -402,9 +278,9 @@ def main():
                     help="Seconds for smooth parking at init/cleanup")
     ap.add_argument("--park-rate-hz", type=float, default=60.0,
                     help="Update rate for smooth parking")
-    ap.add_argument("--az-gear-ratio", dest="az_gear_ratio", type=float, default=None,
+    ap.add_argument("--az-gear-ratio", dest="C.AZ_GEAR_RATIO", type=float, default=None,
                     help="Override AZ gear ratio (default 2.0)")
-    ap.add_argument("--el-gear-ratio", dest="el_gear_ratio", type=float, default=None,
+    ap.add_argument("--el-gear-ratio", dest="C.EL_GEAR_RATIO", type=float, default=None,
                     help="Override EL gear ratio (default 2.0)")
     ap.add_argument("--servo-min-us", dest="servo_min_us", type=float, default=None,
                     help="Override servo min pulse (µs), e.g., 900")
@@ -414,47 +290,51 @@ def main():
     args = ap.parse_args()
 
     # Apply optional overrides
-    global AZ_GEAR_RATIO, EL_GEAR_RATIO, PULSE_MIN_US, PULSE_MAX_US
-    if args.az_gear_ratio is not None:
-        AZ_GEAR_RATIO = float(args.az_gear_ratio)
-    if args.el_gear_ratio is not None:
-        EL_GEAR_RATIO = float(args.el_gear_ratio)
+    global C.AZ_GEAR_RATIO, C.EL_GEAR_RATIO, C.PULSE_MIN_US, C.PULSE_MAX_US
+    if args.C.AZ_GEAR_RATIO is not None:
+        C.AZ_GEAR_RATIO = float(args.C.AZ_GEAR_RATIO)
+    if args.C.EL_GEAR_RATIO is not None:
+        C.EL_GEAR_RATIO = float(args.C.EL_GEAR_RATIO)
     if args.servo_min_us  is not None:
-        PULSE_MIN_US = float(args.servo_min_us)
+        C.PULSE_MIN_US = float(args.servo_min_us)
     if args.servo_max_us  is not None:
-        PULSE_MAX_US = float(args.servo_max_us)
+        C.PULSE_MAX_US = float(args.servo_max_us)
 
     print("=== geo_9 (sim/ground) with base dynamic/static, zero-ref + smoothing + smooth parking ===")
     print(f"[CFG] Mode: {args.mode} | BaseMode: {args.base_mode} | "
-          f"Gear AZ {AZ_GEAR_RATIO}:1, EL {EL_GEAR_RATIO}:1 | "
-          f"Servo 180° @ {PULSE_MIN_US}-{PULSE_MAX_US}µs")
+          f"Gear AZ {C.AZ_GEAR_RATIO}:1, EL {C.EL_GEAR_RATIO}:1 | "
+          f"Servo 180° @ {C.PULSE_MIN_US}-{C.PULSE_MAX_US}µs")
     print(f"[CFG] update_period={args.update_period:.2f}s, print_period={args.print_period:.1f}s, alpha={args.alpha}")
     print(f"[CFG] parking: home=({args.park_home_az:.1f}°, {args.park_home_el:.1f}°) "
           f"face_drone(start={args.park_face_drone_start}, exit={args.park_face_drone_exit}) "
           f"duration={args.park_duration:.2f}s @ {args.park_rate_hz:.0f} Hz")
 
     pi = setup_pigpio()
+    log_open(prefix="Tracker")
 
     # Prepare buffers and readers
     drone_buf = GpsBuffer("drone", maxlen=300)
     base_buf  = GpsBuffer("base",  maxlen=300)
 
+    # Create raw logger function
+    raw_logger = create_raw_logger()
+
     if args.mode == "sim":
-        mav_drone = connect_mav(SIM_DRONE_ENDPOINT, SIM_DRONE_BAUD, True)
-        start_reader(mav_drone, drone_buf, on_raw=log_raw if LOG_RAW_GPS else None)
-        print(f"[CFG] SIM base @ {base_static['lat']}, {base_static['lon']}, {base_static['alt']}m")
+        mav_drone = connect_mav(C.SIM_C.DRONE_ENDPOINT, C.SIM_DRONE_BAUD, True)
+        start_reader(mav_drone, drone_buf, on_raw=raw_logger)
+        print(f"[CFG] SIM base @ {C.base_static['lat']}, {C.base_static['lon']}, {C.base_static['alt']}m")
     else:
-        mav_drone = connect_mav(DRONE_ENDPOINT, DRONE_BAUD, True)
-        mav_base  = connect_mav(BASE_ENDPOINT,  BASE_BAUD,  False)
-        start_reader(mav_drone, drone_buf, on_raw=log_raw if LOG_RAW_GPS else None)
-        start_reader(mav_base,  base_buf,  on_raw=log_raw if LOG_RAW_GPS else None)
+        mav_drone = connect_mav(C.DRONE_ENDPOINT, C.DRONE_BAUD, True)
+        mav_base  = connect_mav(C.BASE_ENDPOINT, C.BASE_BAUD,  False)
+        start_reader(mav_drone, drone_buf, on_raw=raw_logger)
+        start_reader(mav_base,  base_buf,  on_raw=raw_logger)
 
     # ===== Zero-reference setup =====
     zero_world_az = None
     zero_world_el = None
     print("[INFO] Point the tracker at the drone and stabilize GPS.")
     print("[INFO] Waiting 10 seconds for zero reference…")
-    time.sleep(10.0)
+    time.sleep(20.0)
 
     # We need one snapshot of both drone and base for zeroing
     def get_zero_snapshot():
@@ -462,7 +342,7 @@ def main():
         while time.time() < t_end:
             d = drone_buf.latest()
             if args.mode == "sim":
-                b = GpsSample(time.time(), base_static["lat"], base_static["lon"], base_static["alt"])
+                b = GpsSample(time.time(), C.base_static["lat"], C.base_static["lon"], C.base_static["alt"])
             else:
                 b = base_buf.latest()
             if d and b:
@@ -490,14 +370,14 @@ def main():
             abs_az0 = info_init.get("adjusted_azimuth", info_init["azimuth"])
             # EL = home (e.g., horizon)
             world_az0, world_el0 = norm360(abs_az0), args.park_home_el
-            cal_az0, cal_el0 = apply_calibration(world_az0, world_el0)
-            phys_az0, phys_el0 = world_to_physical(cal_az0, cal_el0)
-            s_az0, s_el0 = physical_to_servo_deg(phys_az0, phys_el0)
+            cal_az0, cal_el0 = UTL.apply_calibration(world_az0, world_el0)
+            phys_az0, phys_el0 = UTL.world_to_physical(cal_az0, cal_el0)
+            s_az0, s_el0 = UTL.physical_to_servo_deg(phys_az0, phys_el0)
             smooth_park(pi, s_az0, s_el0, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
     else:
-        cal_az0, cal_el0 = apply_calibration(args.park_home_az, args.park_home_el)
-        phys_az0, phys_el0 = world_to_physical(cal_az0, cal_el0)
-        s_az0, s_el0 = physical_to_servo_deg(phys_az0, phys_el0)
+        cal_az0, cal_el0 = UTL.apply_calibration(args.park_home_az, args.park_home_el)
+        phys_az0, phys_el0 = UTL.world_to_physical(cal_az0, cal_el0)
+        s_az0, s_el0 = UTL.physical_to_servo_deg(phys_az0, phys_el0)
         smooth_park(pi, s_az0, s_el0, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
 
     # ===== Base mode management (GROUND only) =====
@@ -530,7 +410,7 @@ def main():
 
             # compute base according to mode
             if args.mode == "sim":
-                b_lat, b_lon, b_alt = base_static["lat"], base_static["lon"], base_static["alt"]
+                b_lat, b_lon, b_alt = C.base_static["lat"], C.base_static["lon"], C.base_static["alt"]
                 base_locked = True
                 base_sd_lat = base_sd_lon = 0.0
                 base_fix = base_sats = None
@@ -570,15 +450,15 @@ def main():
                 smoothed_el = (1-alpha)*smoothed_el + alpha*world_el
 
             # Calibration → clamp → gearing → pulse
-            cal_az, cal_el   = apply_calibration(smoothed_az, smoothed_el)
-            phys_az, phys_el = world_to_physical(cal_az, cal_el)
-            s_az, s_el       = physical_to_servo_deg(phys_az, phys_el)
-            us_az            = servo_deg_to_us(s_az)
-            us_el            = servo_deg_to_us(s_el)
+            cal_az, cal_el   = UTL.apply_calibration(smoothed_az, smoothed_el)
+            phys_az, phys_el = UTL.world_to_physical(cal_az, cal_el)
+            s_az, s_el       = UTL.physical_to_servo_deg(phys_az, phys_el)
+            us_az            = UTL.servo_deg_to_us(s_az)
+            us_el            = UTL.servo_deg_to_us(s_el)
 
             # Drive servos
-            pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
-            pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
+            pi.set_servo_pulsewidth(C.SERVO_AZ_PIN, us_az)
+            pi.set_servo_pulsewidth(C.SERVO_EL_PIN, us_el)
             last_servo_az, last_servo_el = s_az, s_el
 
             # Console output (paced)
@@ -613,24 +493,24 @@ def main():
         try:
             if args.park_face_drone_exit:
                 # Keep current AZ (last_servo_az), ramp EL → home
-                cal_azH, cal_elH = apply_calibration(0.0, args.park_home_el)
-                phys_azH, phys_elH = world_to_physical(cal_azH, cal_elH)
+                cal_azH, cal_elH = UTL.apply_calibration(0.0, args.park_home_el)
+                phys_azH, phys_elH = UTL.world_to_physical(cal_azH, cal_elH)
                 s_azH = last_servo_az
-                s_elH = physical_to_servo_deg(phys_azH, phys_elH)[1]
+                s_elH = UTL.physical_to_servo_deg(phys_azH, phys_elH)[1]
                 smooth_park(pi, s_azH, s_elH, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
             else:
-                cal_azH, cal_elH = apply_calibration(args.park_home_az, args.park_home_el)
-                phys_azH, phys_elH = world_to_physical(cal_azH, cal_elH)
-                s_azH, s_elH = physical_to_servo_deg(phys_azH, phys_elH)
+                cal_azH, cal_elH = UTL.apply_calibration(args.park_home_az, args.park_home_el)
+                phys_azH, phys_elH = UTL.world_to_physical(cal_azH, cal_elH)
+                s_azH, s_elH = UTL.physical_to_servo_deg(phys_azH, phys_elH)
                 smooth_park(pi, s_azH, s_elH, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
 
             time.sleep(0.2)
-            pi.set_servo_pulsewidth(SERVO_AZ_PIN, 0)
-            pi.set_servo_pulsewidth(SERVO_EL_PIN, 0)
+            pi.set_servo_pulsewidth(C.SERVO_AZ_PIN, 0)
+            pi.set_servo_pulsewidth(C.SERVO_EL_PIN, 0)
             pi.stop()
         except Exception as e:
             print(f"[WARN] pigpio cleanup: {e}")
-        log_close(
+        log_close()
 
 if __name__ == "__main__":
     main()
