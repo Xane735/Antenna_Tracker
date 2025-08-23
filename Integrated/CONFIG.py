@@ -1,6 +1,5 @@
-
-MODE_DEFAULT = "ground"         # "sim" or "ground"
-BASE_MODE_DEFAULT = "static"   # "dynamic" or "static"   (only used in ground mode)
+MODE_DEFAULT        = "ground"         # "sim" or "ground"
+BASE_MODE_DEFAULT   = "static"   # "dynamic" or "static"   (only used in ground mode)
 
 # --- Endpoints ---
 SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14550"
@@ -10,15 +9,17 @@ DRONE_BAUD         = 57600
 BASE_ENDPOINT      = "/dev/ttyUSB0"
 BASE_BAUD          = 57600
 
-# MAVLink stream requests (~5 Hz)
+# MAVLink stream requests (~ 5 Hz)
 MAV_MSG_INTERVAL_US_GPS    = 200_000
 MAV_MSG_INTERVAL_US_GLOBAL = 200_000
 
-# Gear spokes → ratios
-SPOKES_SMALL   = 12
-SPOKES_BIG     = 24
-AZ_GEAR_RATIO  = SPOKES_BIG / SPOKES_SMALL    # default 2.0
-EL_GEAR_RATIO  = SPOKES_BIG / SPOKES_SMALL    # default 2.0
+# Gear spokes ratios
+AZ_SPOKES_SMALL   = 12
+AZ_SPOKES_BIG     = 24
+EL_SPOKES_SMALL   = 12
+EL_SPOKES_BIG     = 24
+AZ_GEAR_RATIO     = AZ_SPOKES_BIG / AZ_SPOKES_SMALL    # default 2.0
+EL_GEAR_RATIO     = EL_SPOKES_BIG / EL_SPOKES_SMALL    # default 2.0
 
 # Physical limits
 AZ_PHYS_MIN = 0.0
@@ -34,15 +35,16 @@ SERVO_RANGE_DEG = 180.0
 # Calibration
 AZIMUTH_ZERO_OFFSET_DEG   = 0.0
 ELEVATION_ZERO_OFFSET_DEG = 90.0
+
 AZIMUTH_INVERT   = True
 ELEVATION_INVERT = False  # set True if your rig needs "up is up"
 
-# pigpio GPIO pins (BCM numbering)
+# pigpio GPIO pins
 SERVO_AZ_PIN = 18
-SERVO_EL_PIN = 17  # per your hardware
+SERVO_EL_PIN = 17 
 
 # Loop timings
-UPDATE_PERIOD_S = 0.10   # 10 Hz default (set higher if your servos prefer slower updates)
+UPDATE_PERIOD_S = 0.10   # 10 Hz default (set higher if you want servo with slower updates)
 PRINT_PERIOD_S  = 1.0
 
 EL_MIN_WORLD_DEG = 0.0
@@ -56,4 +58,4 @@ base_static = {
 }
 
 EL_US_MIN, EL_US_MAX = 900.0, 2100.0
-US_PER_SERVO_DEG = (EL_US_MAX - EL_US_MIN) / 180.0   # 6.666... µs/deg
+US_PER_SERVO_DEG     = (EL_US_MAX - EL_US_MIN) / 180.0   # 6.666... us/deg

@@ -3,6 +3,7 @@ import pathlib
 from datetime import datetime
 from typing import Optional, Callable
 from dataclasses import dataclass
+import gps_io as GPS
 
 # Global logging configuration
 LOG_TO_CSV = True
@@ -13,18 +14,6 @@ _log_writer = None
 _log_file = None
 _raw_writer = None
 _raw_file = None
-
-@dataclass
-class GpsSample:
-    """GPS sample data structure for logging"""
-    t: float
-    lat: float
-    lon: float
-    alt: float
-    eph: Optional[float] = None     # horizontal accuracy (m) if available
-    epv: Optional[float] = None     # vertical accuracy (m) if available
-    fix_type: Optional[int] = None  # 0..6 (3=3D fix)
-    sats: Optional[int] = None
 
 def log_open(prefix="Tracker"):
     """
@@ -77,7 +66,7 @@ def log_row(*row):
         _log_writer.writerow(row)
         _log_file.flush()
 
-def log_raw(stream: str, s: GpsSample):
+def log_raw(stream: str, s: GPS.GpsSample):
     """
     Write a raw GPS sample to the raw GPS CSV log.
     
@@ -107,7 +96,7 @@ def log_close():
     if _raw_file: 
         _raw_file.close()
 
-def create_raw_logger(enabled: bool = True) -> Optional[Callable[[str, GpsSample], None]]:
+def create_raw_logger(enabled: bool = True) -> Optional[Callable[[str, GPS.GpsSample], None]]:
     """
     Create a raw logging function that can be passed as callback.
     

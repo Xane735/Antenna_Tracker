@@ -22,14 +22,14 @@ SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14550"
 SIM_DRONE_BAUD     = None
 DRONE_ENDPOINT     = "/dev/ttyACM0"
 DRONE_BAUD         = 57600
-BASE_ENDPOINT      = "/dev/ttyUSB0"
+BASE_ENDPOINT      = "/dev/ttyACM1"
 BASE_BAUD          = 57600
 
 # MAVLink stream requests (~5 Hz)
 MAV_MSG_INTERVAL_US_GPS    = 200_000
 MAV_MSG_INTERVAL_US_GLOBAL = 200_000
 
-# Gear spokes → ratios
+# Gear spokes ratios
 SPOKES_SMALL   = 12
 SPOKES_BIG     = 24
 AZ_GEAR_RATIO  = SPOKES_BIG / SPOKES_SMALL    # default 2.0
@@ -351,10 +351,7 @@ def compute_sd(values):
     var = sum((x-mean)**2 for x in values) / max(1, (len(values)-1))
     return math.sqrt(var)
 
-def stabilize_base(base_buf: GpsBuffer,
-                   window_sec: float,
-                   sd_thresh_m: float,
-                   min_samples: int = 15) -> Optional[BaseState]:
+def stabilize_base(base_buf: GpsBuffer,window_sec: float,sd_thresh_m: float,min_samples: int = 15) -> Optional[BaseState]:
     """
     Wait until base GPS stabilizes over window_sec with both lat/lon stddev < sd_thresh_m,
     then return the mean position as locked BaseState.
