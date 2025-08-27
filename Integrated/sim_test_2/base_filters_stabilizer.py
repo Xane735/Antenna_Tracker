@@ -10,6 +10,7 @@ from typing import Optional
 import math
 import GPS as gps
 import time
+import helper_fns
 
 # ============= Base filters & stabilizer =============
 
@@ -57,7 +58,7 @@ def stabilize_base(base_buf: gps.GpsBuffer,window_sec: float,sd_thresh_m: float,
                 lat_m = []
                 lon_m = []
                 for s in win:
-                    lm, Lm = gps.latlon_to_meters(s.lat - ref_lat, s.lon - win[-1].lon, ref_lat)
+                    lm, Lm = helper_fns.latlon_to_meters(s.lat - ref_lat, s.lon - win[-1].lon, ref_lat)
                     lat_m.append(lm)
                     lon_m.append(Lm)
                 sd_lat = compute_sd(lat_m)
@@ -93,8 +94,9 @@ def dynamic_base_filtered(base_buf: gps.GpsBuffer,
     lon = rolling_median(lon_vals)
     alt = rolling_median(alt_vals)
     # compute SD in meters for logging insight
-    lat_m = [gps.latlon_to_meters(s - ref_lat, 0.0, ref_lat)[0] for s in lat_vals]
-    lon_m = [gps.latlon_to_meters(0.0, s - lon_vals[-1], ref_lat)[1] for s in lon_vals]
+    lat_m = [helper_fns.latlon_to_meters(s - ref_lat, 0.0, ref_lat)[0] for s in lat_vals]
+    lon_m = [helper_fns.latlon_to_meters(0.0, s - lon_vals[-1], ref_lat)[1] for s in lon_vals]
+    
     return BaseState(
         mode="dynamic", locked=False,
         lat=lat, lon=lon, alt=alt,

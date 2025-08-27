@@ -11,6 +11,7 @@ import GPS as gps
 import pigpio_smooth_parking as psp
 import mavlink
 import csv_logging as csvlog
+import base_filters_stabilizer as bfs
 
 # ============= Main =============
 
@@ -153,11 +154,11 @@ def main():
         psp.smooth_park(pi, s_az0, s_el0, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
 
     # ===== Base mode management (GROUND only) =====
-    con.base_state: Optional[con.BaseState] = None
+    base_state: Optional[bfs.BaseState] = None
     if args.mode == "ground":
         if args.base_mode == "static":
             print(f"[INFO] Static base mode: waiting up to {args.static_window_sec:.1f}s for stabilization (sd<{args.static_sd_thresh_m:.2f}m)…")
-            bs = helper_fns.stabilize_base(base_buf, window_sec=args.static_window_sec, sd_thresh_m=args.static_sd_thresh_m)
+            bs = bfs.stabilize_base(base_buf, window_sec=args.static_window_sec, sd_thresh_m=args.static_sd_thresh_m)
             if bs:
                 base_state = bs
                 print(f"[INFO] Base locked: lat={bs.lat:.7f} lon={bs.lon:.7f} alt={bs.alt:.2f}  (sd≈{bs.sd_lat_m:.2f}/{bs.sd_lon_m:.2f} m)")
@@ -195,7 +196,7 @@ def main():
                     base_fix, base_sats = base_state.fix_type, base_state.sats
                     base_mode_str = "static"
                 else:
-                    bs = helper_fns.dynamic_base_filtered(base_buf, window_sec=args.dynamic_window_sec)
+                    bs = bfs.dynamic_base_filtered(base_buf, window_sec=args.dynamic_window_sec)
                     if not bs:
                         time.sleep(0.05); continue
                     b_lat, b_lon, b_alt = bs.lat, bs.lon, bs.alt
@@ -235,7 +236,7 @@ def main():
 
             # Console output (paced)
             if time.time() >= next_print:
-                print(f"[{datetime.now():%H:%M:%S}] Base={con.base_mode_str}{'Locked' if base_locked else ''} "
+                print(f"[{datetime.datetime.now():%H:%M:%S}] Base={base_mode_str}{'Locked' if base_locked else ''} "
                       f"sd≈{base_sd_lat:.2f}/{base_sd_lon:.2f}m | "
                       f"WORLD {smoothed_az:6.2f}/{smoothed_el:5.2f}° | "
                       f"SERVO {s_az:6.2f}/{s_el:5.2f}° | µs {us_az:5.0f}/{us_el:5.0f}")
@@ -243,7 +244,7 @@ def main():
 
             # CSV log (padded with diagnostics)
             csvlog.log_row(
-                datetime.now().isoformat(timespec='seconds'),
+                datetime.datetime.now().isoformat(timespec='seconds'),
                 base_mode_str, 1 if base_locked else 0,
                 round(smoothed_az,3), round(smoothed_el,3),
                 round(cal_az,3), round(cal_el,3),

@@ -19,7 +19,7 @@ def connect_mav(endpoint: str, baud: Optional[int], hb_required: bool) -> mavuti
     except Exception as e:
         if hb_required:
             raise
-        print(f"[MAV] No heartbeat on {endpoint} – continuing: {e}")
+        print(f"[MAV] No heartbeat on {endpoint} - continuing: {e}")
     for msg_id, interval in (
         (mavutil.mavlink.MAVLINK_MSG_ID_GPS_RAW_INT,    constants.MAV_MSG_INTERVAL_US_GPS),
         (mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, constants.MAV_MSG_INTERVAL_US_GLOBAL),

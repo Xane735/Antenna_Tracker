@@ -65,11 +65,18 @@ LOG_RAW_GPS     = True   # per-message GPS capture (for precision analysis)
 EL_MIN_WORLD_DEG = 0.0
 EL_MAX_WORLD_DEG = 90.0
 
-def _clamp(x, lo, hi):
-    return lo if x < lo else hi if x > hi else x
-
 EL_US_MIN, EL_US_MAX = 900.0, 2100.0
 US_PER_SERVO_DEG = (EL_US_MAX - EL_US_MIN) / 180.0   # 6.666... µs/deg
+
+# SIM base (used only in SIM mode)
+base_static = {
+    "lat": 13.0281865,
+    "lon": 77.5675790,
+    "alt": 931.13,          # metres ASL
+}
+
+def _clamp(x, lo, hi):
+    return lo if x < lo else hi if x > hi else x
 
 def world_el_to_us(world_el_deg: float) -> int:
     # clamp to 0..90 so you never drive below horizon or beyond straight up
@@ -85,13 +92,6 @@ def world_el_to_us(world_el_deg: float) -> int:
     if us < EL_US_MIN: us = EL_US_MIN
     if us > EL_US_MAX: us = EL_US_MAX
     return int(us)
-
-# SIM base (used only in SIM mode)
-base_static = {
-    "lat": 13.0281865,
-    "lon": 77.5675790,
-    "alt": 931.13,          # metres ASL
-}
 
 # ============= Helpers & Small Utilities =============
 

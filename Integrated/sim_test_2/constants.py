@@ -81,7 +81,7 @@ def world_el_to_us(world_el_deg: float) -> int:
 
 # SIM base (used only in SIM mode)
 base_static = {
-    "lat": 13.0281865,
-    "lon": 77.5675790,
+    "lat": 13.0277429,
+    "lon": 77.5631762,
     "alt": 931.13,          # metres ASL
 }
