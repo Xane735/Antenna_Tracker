@@ -59,9 +59,9 @@ def main():
     ap.add_argument("--el-gear-ratio", dest="el_gear_ratio", type=float, default=None,
                     help="Override EL gear ratio (default 2.0)")
     ap.add_argument("--servo-min-us", dest="servo_min_us", type=float, default=None,
-                    help="Override servo min pulse (µs), e.g., 900")
+                    help="Override servo min pulse (us), e.g., 900")
     ap.add_argument("--servo-max-us", dest="servo_max_us", type=float, default=None,
-                    help="Override servo max pulse (µs), e.g., 1200")
+                    help="Override servo max pulse (us), e.g., 1200")
 
     args = ap.parse_args()
 
@@ -79,7 +79,7 @@ def main():
     print("=== geo_9 (sim/ground) with base dynamic/static, zero-ref + smoothing + smooth parking ===")
     print(f"[CFG] Mode: {args.mode} | BaseMode: {args.base_mode} | "
           f"Gear AZ {con.AZ_GEAR_RATIO}:1, EL {con.EL_GEAR_RATIO}:1 | "
-          f"Servo 180° @ {con.PULSE_MIN_US}-{con.PULSE_MAX_US}µs")
+          f"Servo 180° @ {con.PULSE_MIN_US}-{con.PULSE_MAX_US}us")
     print(f"[CFG] update_period={args.update_period:.2f}s, print_period={args.print_period:.1f}s, alpha={args.alpha}")
     print(f"[CFG] parking: home=({args.park_home_az:.1f}°, {args.park_home_el:.1f}°) "
           f"face_drone(start={args.park_face_drone_start}, exit={args.park_face_drone_exit}) "

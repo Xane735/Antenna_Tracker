@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Aug 23 09:39:58 2025
-
-@author: Dell
-"""
-
 from dataclasses import dataclass
 from typing import Optional, Tuple
 import time

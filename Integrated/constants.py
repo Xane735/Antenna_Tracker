@@ -1,12 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Aug 23 09:11:53 2025
-
-@author: Dell
-"""
-
-# ===================== Defaults (overridable by CLI) =====================
-
 MODE_DEFAULT = "ground"         # "sim" or "ground"
 BASE_MODE_DEFAULT = "static"   # "dynamic" or "static"   (only used in ground mode)
 
@@ -58,18 +49,18 @@ LOG_RAW_GPS     = True   # per-message GPS capture (for precision analysis)
 EL_MIN_WORLD_DEG = 0.0
 EL_MAX_WORLD_DEG = 90.0
 
-def _clamp(x, lo, hi):
-    return lo if x < lo else hi if x > hi else x
-
 EL_US_MIN, EL_US_MAX = 900.0, 2100.0
 US_PER_SERVO_DEG = (EL_US_MAX - EL_US_MIN) / 180.0   # 6.666... µs/deg
+
+def _clamp(x, lo, hi):
+    return lo if x < lo else hi if x > hi else x
 
 def world_el_to_us(world_el_deg: float) -> int:
     # clamp to 0..90 so you never drive below horizon or beyond straight up
     w = _clamp(world_el_deg, EL_MIN_WORLD_DEG, EL_MAX_WORLD_DEG)
 
     # mapping for your 2:1 gear and 1500 µs (servo 90°) = sky:
-    # world_el: 0→horizon, +90→sky
+    # world_el: 0:horizon, + 90:sky
     # servo_deg = (world_el + 90)/2
     servo_deg = (w + 90.0) / 2.0
 
@@ -79,7 +70,7 @@ def world_el_to_us(world_el_deg: float) -> int:
     if us > EL_US_MAX: us = EL_US_MAX
     return int(us)
 
-# SIM base (used only in SIM mode)
+# SIM base
 base_static = {
     "lat": 13.0277429,
     "lon": 77.5631762,

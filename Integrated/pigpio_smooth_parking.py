@@ -1,9 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Aug 23 09:44:35 2025
-
-@author: Dell
-"""
 import pigpio
 import constants as con
 import time

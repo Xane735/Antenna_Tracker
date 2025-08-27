@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Aug 23 09:25:27 2025
-
-@author: Dell
-"""
-
 from typing import Tuple
 import constants
 import math

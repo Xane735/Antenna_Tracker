@@ -1,15 +1,7 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Aug 23 10:00:04 2025
-
-@author: Dell
-"""
-
 import constants
 from datetime import datetime
 import GPS as gps
 
-# ============= CSV logging =============
 _log_writer = None
 _log_file   = None
 _raw_writer = None
