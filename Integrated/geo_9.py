@@ -32,7 +32,7 @@ def main():
     ap.add_argument("--dynamic-window-sec", type=float, default=6.0,
                     help="Window for rolling median in dynamic mode")
 
-    ap.add_argument("--alpha", type=float, default=0.2,
+    ap.add_argument("--alpha", type=float, default=1,
                     help="Exponential smoothing factor for world az/el (0..1)")
 
     ap.add_argument("--print-period", type=float, default=con.PRINT_PERIOD_S,

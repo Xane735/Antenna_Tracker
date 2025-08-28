@@ -5,9 +5,9 @@ import sys
 
 # Global lists for ports and baud rates
 Port1 = "/dev/ttyACM0"
-Port2 = "/dev/ttyACM1"
+Port2 = "/dev/ttyUSB0"
 #Port3 = "/dev/ttyUSB0"
-baud_rate = 9600
+baud_rate = 57600
 
 def gps_stream(port, baud_rate, pixhawk):
     msg_id = 24  # Message ID for GPS_RAW_INT
