@@ -1,10 +1,9 @@
-# Code to be tested. Hopefully is the final code
+# Removed Smoothing filter to get correct spikes
+
 import argparse
 import time
-from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
-import math
 import threading
 from typing import Optional, Tuple, Callable
 
@@ -22,12 +21,12 @@ SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14550"
 SIM_DRONE_BAUD     = None
 DRONE_ENDPOINT     = "/dev/ttyACM0"
 DRONE_BAUD         = 57600
-BASE_ENDPOINT      = "/dev/ttyACM1"
+BASE_ENDPOINT      = "/dev/ttyUSB0"
 BASE_BAUD          = 57600
 
 # MAVLink stream requests (~5 Hz)
 MAV_MSG_INTERVAL_US_GPS    = 200_000
-MAV_MSG_INTERVAL_US_GLOBAL = 200_000
+MAV_MSG_INTERVAL_US_GLOBAL = 50_000
 
 # Gear spokes ratios
 SPOKES_SMALL   = 12
@@ -57,16 +56,13 @@ SERVO_AZ_PIN = 18
 SERVO_EL_PIN = 17  # per your hardware
 
 # Loop timings
-UPDATE_PERIOD_S = 0.10   # 10 Hz default (set higher if your servos prefer slower updates)
-PRINT_PERIOD_S  = 1.0
+UPDATE_PERIOD_S = 0.05   # 10 Hz default (set higher if your servos prefer slower updates)
+PRINT_PERIOD_S  = 1.5
 LOG_TO_CSV      = True
 LOG_RAW_GPS     = True   # per-message GPS capture (for precision analysis)
 
 EL_MIN_WORLD_DEG = 0.0
 EL_MAX_WORLD_DEG = 90.0
-
-EL_US_MIN, EL_US_MAX = 900.0, 2100.0
-US_PER_SERVO_DEG = (EL_US_MAX - EL_US_MIN) / 180.0   # 6.666... µs/deg
 
 # SIM base (used only in SIM mode)
 base_static = {
@@ -74,24 +70,6 @@ base_static = {
     "lon": 77.5675790,
     "alt": 931.13,          # metres ASL
 }
-
-def _clamp(x, lo, hi):
-    return lo if x < lo else hi if x > hi else x
-
-def world_el_to_us(world_el_deg: float) -> int:
-    # clamp to 0..90 so you never drive below horizon or beyond straight up
-    w = _clamp(world_el_deg, EL_MIN_WORLD_DEG, EL_MAX_WORLD_DEG)
-
-    # mapping for your 2:1 gear and 1500 µs (servo 90°) = sky:
-    # world_el: 0→horizon, +90→sky
-    # servo_deg = (world_el + 90)/2
-    servo_deg = (w + 90.0) / 2.0
-
-    us = 1500.0 + (servo_deg - 90.0) * US_PER_SERVO_DEG
-    # final safety clamp to mechanical µs range
-    if us < EL_US_MIN: us = EL_US_MIN
-    if us > EL_US_MAX: us = EL_US_MAX
-    return int(us)
 
 # ============= Helpers & Small Utilities =============
 
@@ -121,12 +99,6 @@ def physical_to_servo_deg(az_phys: float, el_phys: float) -> Tuple[float, float]
 def servo_deg_to_us(deg: float) -> float:
     deg = max(0.0, min(SERVO_RANGE_DEG, deg))
     return PULSE_MIN_US + (deg / SERVO_RANGE_DEG) * (PULSE_MAX_US - PULSE_MIN_US)
-
-# Quick deg→meters conversion (approx), good enough for stability heuristics
-def latlon_to_meters(lat_deg: float, lon_deg: float, ref_lat_deg: float) -> Tuple[float,float]:
-    lat_m = lat_deg * 111_320.0
-    lon_m = lon_deg * 111_320.0 * math.cos(math.radians(ref_lat_deg))
-    return lat_m, lon_m
 
 # ============= Thread-safe GPS sample stores =============
 
@@ -267,7 +239,6 @@ def start_reader(mav: mavutil.mavfile, stream_name: str, on_raw: Optional[Callab
     th.start()
     return th
 
-
 # ============= CSV logging =============
 _log_writer = None
 _log_file   = None
@@ -305,17 +276,21 @@ def log_open(prefix="Tracker"):
 def log_row(*row):
     if _log_writer:
         _log_writer.writerow(row)
-        _log_file.flush()
+        if _log_file:
+            _log_file.flush()
 
 def log_raw(stream: str, s: GpsSample):
     if _raw_writer:
-        _raw_writer.writerow([datetime.now().isoformat(timespec='seconds'),
-                              stream, f"{s.lat:.7f}", f"{s.lon:.7f}", f"{s.alt:.2f}",
-                              "" if s.eph is None else f"{s.eph:.2f}",
-                              "" if s.epv is None else f"{s.epv:.2f}",
-                              "" if s.fix_type is None else s.fix_type,
-                              "" if s.sats is None else s.sats])
-        _raw_file.flush()
+        _raw_writer.writerow([
+            datetime.now().isoformat(timespec='seconds'),
+            stream, f"{s.lat:.7f}", f"{s.lon:.7f}", f"{s.alt:.2f}",
+            "" if s.eph is None else f"{s.eph:.2f}",
+            "" if s.epv is None else f"{s.epv:.2f}",
+            "" if s.fix_type is None else s.fix_type,
+            "" if s.sats is None else s.sats
+        ])
+        if _raw_file:
+            _raw_file.flush()
 
 def log_close():
     if _log_file: _log_file.close()
@@ -323,10 +298,10 @@ def log_close():
 
 # ============= Latest-sample stores (thread-safe) ============= #
 
-_latest_base = None
-_latest_drone = None
-_base_lock = Lock()
-_drone_lock = Lock()
+_latest_base    = None
+_latest_drone   = None
+_base_lock      = threading.Lock()
+_drone_lock     = threading.Lock()
 
 def set_latest_base(sample):  # sample: GpsSample or similar
     global _latest_base
@@ -353,26 +328,14 @@ def main():
     ap.add_argument("--mode", choices=["sim","ground"], default=MODE_DEFAULT,
                     help="Run mode: SITL 'sim' or hardware 'ground' (default: ground)")
 
-    ap.add_argument("--base-mode", choices=["dynamic","static"], default=BASE_MODE_DEFAULT,
-                    help="Base position mode for 'ground': dynamic (filtered live) or static (auto-lock)")
-
-    ap.add_argument("--static-window-sec", type=float, default=10.0,
-                    help="Seconds of stable base needed before locking (static mode)")
-
-    ap.add_argument("--static-sd-thresh-m", type=float, default=0.9,
-                    help="Stddev threshold in meters to consider base stable (static mode)")
-
-    ap.add_argument("--dynamic-window-sec", type=float, default=6.0,
-                    help="Window for rolling median in dynamic mode")
-
-    ap.add_argument("--alpha", type=float, default=0.2,
-                    help="Exponential smoothing factor for world az/el (0..1)")
-
     ap.add_argument("--print-period", type=float, default=PRINT_PERIOD_S,
                     help="Seconds between console prints")
 
     ap.add_argument("--update-period", type=float, default=UPDATE_PERIOD_S,
                     help="Main loop period seconds (servo update rate)")
+
+    ap.add_argument("--base-mode", choices=["static","dynamic"], default=BASE_MODE_DEFAULT,
+                help="Base position mode for 'ground': static (freeze after 10s) or dynamic (always latest)")
 
     # Parking & overrides
     ap.add_argument("--park-home-az", type=float, default=0.0,
@@ -392,9 +355,9 @@ def main():
     ap.add_argument("--el-gear-ratio", dest="el_gear_ratio", type=float, default=None,
                     help="Override EL gear ratio (default 2.0)")
     ap.add_argument("--servo-min-us", dest="servo_min_us", type=float, default=None,
-                    help="Override servo min pulse (µs), e.g., 900")
+                    help="Override servo min pulse (us), e.g., 900")
     ap.add_argument("--servo-max-us", dest="servo_max_us", type=float, default=None,
-                    help="Override servo max pulse (µs), e.g., 1200")
+                    help="Override servo max pulse (us), e.g., 1200")
 
     args = ap.parse_args()
 
@@ -409,11 +372,11 @@ def main():
     if args.servo_max_us  is not None:
         PULSE_MAX_US = float(args.servo_max_us)
 
-    print("=== geo_9 (sim/ground) with base dynamic/static, zero-ref + smoothing + smooth parking ===")
+    print("=== geo_10 (sim/ground) with base dynamic/static, zero-ref + smooth parking ===")
     print(f"[CFG] Mode: {args.mode} | BaseMode: {args.base_mode} | "
           f"Gear AZ {AZ_GEAR_RATIO}:1, EL {EL_GEAR_RATIO}:1 | "
-          f"Servo 180° @ {PULSE_MIN_US}-{PULSE_MAX_US}µs")
-    print(f"[CFG] update_period={args.update_period:.2f}s, print_period={args.print_period:.1f}s, alpha={args.alpha}")
+          f"Servo 180° @ {PULSE_MIN_US}-{PULSE_MAX_US}us")
+    print(f"[CFG] update_period={args.update_period:.2f}s, print_period={args.print_period:.1f}s")
     print(f"[CFG] parking: home=({args.park_home_az:.1f}°, {args.park_home_el:.1f}°) "
           f"face_drone(start={args.park_face_drone_start}, exit={args.park_face_drone_exit}) "
           f"duration={args.park_duration:.2f}s @ {args.park_rate_hz:.0f} Hz")
@@ -432,12 +395,30 @@ def main():
         start_reader(mav_drone, "DRONE", on_raw=log_raw if LOG_RAW_GPS else None)
         start_reader(mav_base,  "BASE",  on_raw=log_raw if LOG_RAW_GPS else None)
 
+    # ----- Base mode handling (ground only) -----
+    base_fixed = None  # (lat, lon, alt) when static
+    if args.mode == "ground":
+        if args.base_mode == "static":
+            print("[INFO] Base mode=static → waiting 10s, then freezing base GPS.")
+            t_end = time.time() + 10.0
+            while time.time() < t_end:
+                b_try = get_latest_base()
+                if b_try:
+                    base_fixed = (b_try.lat, b_try.lon, b_try.alt)
+                time.sleep(0.1)
+            if base_fixed is None:
+                print("[WARN] No base GPS received during static lock window; will freeze on the first base sample in the loop.")
+            else:
+                print(f"[INFO] Base frozen to lat = {base_fixed[0]:.7f}, lon={base_fixed[1]:.7f}, alt={base_fixed[2]:.2f}")
+        else:
+            print("[INFO] Base mode = dynamic - always use latest base GPS.")
+
     # ===== Zero-reference setup =====
     zero_world_az = None
     zero_world_el = None
     print("[INFO] Point the tracker at the drone and stabilize GPS.")
     print("[INFO] Waiting 10 seconds for zero reference…")
-    time.sleep(20.0)
+    time.sleep(10.0)
 
     # We need one snapshot of both drone and base for zeroing
     def get_zero_snapshot():
@@ -447,7 +428,10 @@ def main():
             if args.mode == "sim":
                 b = GpsSample(time.time(), base_static["lat"], base_static["lon"], base_static["alt"])
             else:
-                b = get_latest_base()
+                if args.base_mode == "static" and base_fixed is not None:
+                    b = GpsSample(time.time(), base_fixed[0], base_fixed[1], base_fixed[2])
+                else:
+                    b = get_latest_base()
             if d and b:
                 return d, b
             time.sleep(0.1)
@@ -485,39 +469,48 @@ def main():
         smooth_park(pi, s_az0, s_el0, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
 
     # Prepare smoothing variables and print pacing
-    smoothed_az = None
-    smoothed_el = None
-    alpha = max(0.0, min(1.0, args.alpha))
     next_print = time.time()
     last_servo_az = 0.0
     last_servo_el = 0.0
 
     try:
         while True:
-            # snapshot drone
-            # snapshot latest (no buffering)
+            # --- DRONE (latest) ---
             d = get_latest_drone()
             if not d:
                 time.sleep(0.01); continue
 
+            # --- BASE (by mode) ---
             if args.mode == "sim":
                 b_lat, b_lon, b_alt = base_static["lat"], base_static["lon"], base_static["alt"]
                 base_mode_str = "static(SIM)"
                 base_fix = base_sats = None
             else:
-                b = get_latest_base()
-                if not b:
-                    time.sleep(0.01); continue
-                b_lat, b_lon, b_alt = b.lat, b.lon, b.alt
-                base_mode_str = "raw"
-                base_fix = getattr(b, "fix_type", None)
-                base_sats = getattr(b, "sats", None)
+                if args.base_mode == "static":
+                    # If we didn't get one earlier, block until we have at least one sample
+                    if base_fixed is None:
+                        b_now = get_latest_base()
+                        if not b_now:
+                            time.sleep(0.01); continue
+                        base_fixed = (b_now.lat, b_now.lon, b_now.alt)
+                        print(f"[INFO] Base frozen late to lat={base_fixed[0]:.7f}, lon={base_fixed[1]:.7f}, alt={base_fixed[2]:.2f}")
+                    b_lat, b_lon, b_alt = base_fixed
+                    base_mode_str = "static"
+                    base_fix = base_sats = None
+                else:  # dynamic
+                    b = get_latest_base()
+                    if not b:
+                        time.sleep(0.01); continue
+                    b_lat, b_lon, b_alt = b.lat, b.lon, b.alt
+                    base_mode_str = "dynamic"
+                    base_fix = getattr(b, "fix_type", None)
+                    base_sats = getattr(b, "sats", None)
 
-            # no lock / no sd when raw
-            base_locked = False
+            # Diagnostics (we don't compute SDs anymore)
+            base_locked = (args.mode == "sim") or (args.base_mode == "static")
             base_sd_lat = base_sd_lon = 0.0
 
-            # Compute angles
+            # --- Angles (NO filtering) ---
             info = tracker.get_tracking_info(b_lat, b_lon, b_alt, d.lat, d.lon, d.alt)
             if not info:
                 time.sleep(args.update_period); continue
@@ -527,15 +520,8 @@ def main():
             world_az = norm360(abs_az - (zero_world_az or 0.0))
             world_el = abs_el - (zero_world_el or 0.0)
 
-            # Low-pass smoothing of world az/el
-            if smoothed_az is None:
-                smoothed_az, smoothed_el = world_az, world_el
-            else:
-                smoothed_az = (1-alpha)*smoothed_az + alpha*world_az
-                smoothed_el = (1-alpha)*smoothed_el + alpha*world_el
-
-            # Calibration → clamp → gearing → pulse
-            cal_az, cal_el   = apply_calibration(smoothed_az, smoothed_el)
+            # Calibration → clamp → gearing → pulse (direct; no smoothing)
+            cal_az, cal_el   = apply_calibration(world_az, world_el)
             phys_az, phys_el = world_to_physical(cal_az, cal_el)
             s_az, s_el       = physical_to_servo_deg(phys_az, phys_el)
             us_az            = servo_deg_to_us(s_az)
@@ -549,25 +535,26 @@ def main():
             # Console output (paced)
             if time.time() >= next_print:
                 print(f"[{datetime.now():%H:%M:%S}] Base={base_mode_str} "
-                        f"sd≈{base_sd_lat:.2f}/{base_sd_lon:.2f}m | "
-                        f"WORLD {smoothed_az:6.2f}/{smoothed_el:5.2f}° | "
-                        f"SERVO {s_az:6.2f}/{s_el:5.2f}° | µs {us_az:5.0f}/{us_el:5.0f}")
+                    f"WORLD {world_az:6.2f}/{world_el:5.2f}° | "
+                    f"SERVO {s_az:6.2f}/{s_el:5.2f}° | us {us_az:5.0f}/{us_el:5.0f}")
+                next_print = time.time() + max(0.2, args.print_period)
 
             # CSV log (padded with diagnostics)
             log_row(
-                datetime.now().isoformat(timespec='seconds'),
-                base_mode_str, 1 if base_locked else 0,
-                round(smoothed_az,3), round(smoothed_el,3),
-                round(cal_az,3), round(cal_el,3),
-                round(phys_az,3), round(phys_el,3),
-                round(s_az,3), round(s_el,3),
-                round(us_az,1), round(us_el,1),
-                round(d.lat,7), round(d.lon,7), round(d.alt,2),
-                round(b_lat,7), round(b_lon,7), round(b_alt,2),
-                round(base_sd_lat,3), round(base_sd_lon,3),
-                "" if base_fix is None else base_fix,
-                "" if base_sats is None else base_sats
-            )
+                    datetime.now().isoformat(timespec='seconds'),
+                    base_mode_str, 1 if base_locked else 0,
+                    round(world_az,3), round(world_el,3),
+                    round(cal_az,3), round(cal_el,3),
+                    round(phys_az,3), round(phys_el,3),
+                    round(s_az,3), round(s_el,3),
+                    round(us_az,1), round(us_el,1),
+                    round(d.lat,7), round(d.lon,7), round(d.alt,2),
+                    round(b_lat,7), round(b_lon,7), round(b_alt,2),
+                    round(base_sd_lat,3), round(base_sd_lon,3),
+                    "" if base_fix is None else base_fix,
+                    "" if base_sats is None else base_sats
+                )
+
             time.sleep(args.update_period)
 
     except KeyboardInterrupt:
