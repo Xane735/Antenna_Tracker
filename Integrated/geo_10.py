@@ -19,9 +19,9 @@ BASE_MODE_DEFAULT = "static"     # "static" (freeze after 10s) or "dynamic"
 # --- Endpoints ---
 SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14550"
 SIM_DRONE_BAUD     = None
-DRONE_ENDPOINT     = "/dev/ttyACM0"
+DRONE_ENDPOINT     = "/dev/ttyUSB0"
 DRONE_BAUD         = 57600
-BASE_ENDPOINT      = "/dev/ttyACM1"
+BASE_ENDPOINT      = "/dev/ttyACM0"
 BASE_BAUD          = 57600
 
 # MAVLink stream requests (adjust if you want faster UI response)
@@ -36,7 +36,7 @@ EL_GEAR_RATIO  = SPOKES_BIG / SPOKES_SMALL    # default 2.0
 
 # Physical limits
 AZ_PHYS_MIN = 0.0
-AZ_PHYS_MAX = 350.0
+AZ_PHYS_MAX = 360.0
 EL_PHYS_MIN = 0.0
 EL_PHYS_MAX = 180.0
 
@@ -46,8 +46,8 @@ PULSE_MAX_US    = 2100.0
 SERVO_RANGE_DEG = 180.0
 
 # Calibration
-AZIMUTH_ZERO_OFFSET_DEG   = 0.0
-ELEVATION_ZERO_OFFSET_DEG = 90.0
+AZIMUTH_ZERO_OFFSET_DEG   = -30.0
+ELEVATION_ZERO_OFFSET_DEG = 0.0
 AZIMUTH_INVERT   = True
 ELEVATION_INVERT = False
 
@@ -56,8 +56,8 @@ SERVO_AZ_PIN = 18
 SERVO_EL_PIN = 17
 
 # Loop timings
-UPDATE_PERIOD_S = 0.05   # main loop period; try 0.02–0.05 for snappier updates
-PRINT_PERIOD_S  = 1.0
+UPDATE_PERIOD_S = 0.02   # main loop period; try 0.02–0.05 for snappier updates
+PRINT_PERIOD_S  = 0.5
 LOG_TO_CSV      = True
 LOG_RAW_GPS     = True
 
@@ -453,8 +453,8 @@ def main():
 
             abs_az = info.get('adjusted_azimuth', info['azimuth'])
             abs_el = info.get('adjusted_elevation', info['elevation'])
-            world_az = 0.0
-            world_el = 0.0
+            world_az = abs_az
+            world_el = abs_el
 
             # Calibration → clamp → gearing → pulse
             cal_az, cal_el   = apply_calibration(world_az, world_el)
