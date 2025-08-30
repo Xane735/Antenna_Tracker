@@ -62,7 +62,7 @@ LOG_TO_CSV      = True
 LOG_RAW_GPS     = False # Make sure to remove once everything works. Most useless feature youve added *smh smh*
 
 # SIM base (used only in SIM mode)
-base_static = {"lat": 13.0281865, "lon": 77.5675790, "alt": 931.13}
+base_static = {"lat": 13.0321826, "lon": 77.5630286, "alt": 931.13}
 
 # --- Tracking dynamics (snappy but safe) --- (Jump the values to 300-360, but can make it jerky or jumpy)
 AZ_MAX_DEG_PER_SEC   = 240.0     # how fast the ANTENNA may rotate
