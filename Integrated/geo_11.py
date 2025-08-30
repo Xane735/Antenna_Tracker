@@ -59,7 +59,7 @@ SERVO_EL_PIN = 17
 UPDATE_PERIOD_S = 0.02   # main loop period; try 0.02–0.05 for snappier updates
 PRINT_PERIOD_S  = 0.5
 LOG_TO_CSV      = True
-LOG_RAW_GPS     = True
+LOG_RAW_GPS     = False # Make sure to remove once everything works. Most useless feature youve added *smh smh*
 
 # SIM base (used only in SIM mode)
 base_static = {"lat": 13.0281865, "lon": 77.5675790, "alt": 931.13}

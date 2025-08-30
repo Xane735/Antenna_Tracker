@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import threading
 from typing import Optional, Tuple, Callable
+import gps_check
 
 import pigpio
 from pymavlink import mavutil
@@ -59,7 +60,7 @@ SERVO_EL_PIN = 17
 UPDATE_PERIOD_S = 0.02   # main loop period; try 0.02–0.05 for snappier updates
 PRINT_PERIOD_S  = 0.5
 LOG_TO_CSV      = True
-LOG_RAW_GPS     = True
+LOG_RAW_GPS     = False # Make sure to remove once everything works. Most useless feature youve added *smh smh*
 
 # SIM base (used only in SIM mode)
 base_static = {"lat": 13.0281865, "lon": 77.5675790, "alt": 931.13}
@@ -225,7 +226,7 @@ def connect_mav(endpoint: str, baud: Optional[int], hb_required: bool) -> mavuti
     except Exception as e:
         if hb_required:
             raise
-        print(f"[MAV] No heartbeat on {endpoint} – continuing: {e}")
+        print(f"[MAV] No heartbeat on {endpoint} - continuing: {e}")
     for msg_id, interval in (
         (mavutil.mavlink.MAVLINK_MSG_ID_GPS_RAW_INT,        MAV_MSG_INTERVAL_US_GPS),
         (mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, MAV_MSG_INTERVAL_US_GLOBAL),
@@ -355,6 +356,10 @@ def main():
     EL_GEAR_RATIO = float(EL_GEAR_RATIO)
     PULSE_MIN_US  = float(PULSE_MIN_US)
     PULSE_MAX_US  = float(PULSE_MAX_US)
+
+    print("Checking GPS streams...")
+    gps_check.gps_check()
+    time.sleep(2.0)
 
     print("=== geo_10 (sim/ground) — static/dynamic base, zero-ref, smooth parking — NO FILTERING ===")
     print(f"[CFG] Mode: {args.mode} | BaseMode: {args.base_mode} | Gear AZ {AZ_GEAR_RATIO}:1, EL {EL_GEAR_RATIO}:1 | Servo 180° @ {PULSE_MIN_US}-{PULSE_MAX_US}µs")
