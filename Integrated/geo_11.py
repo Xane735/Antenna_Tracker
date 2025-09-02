@@ -56,7 +56,7 @@ SERVO_AZ_PIN = 18
 SERVO_EL_PIN = 17
 
 # Loop timings
-UPDATE_PERIOD_S = 0.05   # main loop period; try 0.02–0.05 for snappier updates
+UPDATE_PERIOD_S = 0.09   # main loop period; try 0.02–0.05 for snappier updates
 PRINT_PERIOD_S  = 1.0
 LOG_TO_CSV      = True
 LOG_RAW_GPS     = False # Make sure to remove once everything works. Most useless feature youve added *smh smh*
@@ -126,6 +126,11 @@ def choose_flipped_if_better(cal_az: float, cal_el: float,
     We pick the option that minimizes servo movement from last_saz/last_sel,
     with a small hysteresis so we don't thrash.
     """
+    AZ_WEIGHT = 1.0
+    EL_WEIGHT = 0.30        # 0.25–0.35 is a good range
+    EDGE = 12.0             # servo-deg from 0/180 that arms the seam logic
+    MIN_EL_FOR_FLIP = 3.0   # don’t flip if elevation is extremely close to 0/180
+
     # Candidate A: normal
     A_az, A_el = world_to_physical(cal_az, cal_el)
     A_saz, A_sel = physical_to_servo_deg(A_az, A_el)
@@ -140,12 +145,27 @@ def choose_flipped_if_better(cal_az: float, cal_el: float,
     B_saz, B_sel = physical_to_servo_deg(B_az, B_el)
     B_cost = abs(B_saz - last_saz) + abs(B_sel - last_sel)
 
-    # Only switch if clearly better by margin
+    A_cost = AZ_WEIGHT * abs(A_saz - last_saz) + EL_WEIGHT * abs(A_sel - last_sel)
+    B_cost = AZ_WEIGHT * abs(B_saz - last_saz) + EL_WEIGHT * abs(B_sel - last_sel)
+
+    # Arm seam logic only near edges and if the normal candidate would "cross" to the opposite edge
+    near_edge = (last_saz < EDGE) or (last_saz > 180.0 - EDGE)
+    crosses_edge = (last_saz < EDGE and A_saz > 180.0 - EDGE) or (last_saz > 180.0 - EDGE and A_saz < EDGE)
+
+    # Elevation safety: avoid flips at extreme el unless you KNOW it’s safe mechanically
+    el_ok = (A_el >= MIN_EL_FOR_FLIP) and (A_el <= 180.0 - MIN_EL_FOR_FLIP)
+
+    # Seam override: if we're about to teleport the az servo, prefer the back-side even if margin not met
+    if near_edge and crosses_edge and el_ok:
+        # Either B is already better, or allow a small "assist" by ignoring hysteresis here
+        if (B_cost <= A_cost) or (B_cost + FLIP_HYSTERESIS_DEG <= A_cost):
+            return B_az, B_el, True
+
+    # Normal hysteresis (sticky) behavior elsewhere
     if B_cost + FLIP_HYSTERESIS_DEG < A_cost:
         return B_az, B_el, True
     else:
         return A_az, A_el, False
-
 
 # ===================== Thread-safe latest GPS =====================
 
