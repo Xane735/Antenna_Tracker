@@ -62,12 +62,17 @@ LOG_TO_CSV      = True
 LOG_RAW_GPS     = False # Make sure to remove once everything works. Most useless feature youve added *smh smh*
 
 # SIM base (used only in SIM mode)
-base_static = {"lat": 13.0328385, "lon": 77.5635463, "alt": 931.13}
+base_static = {"lat": 13.0276175, "lon": 77.5629830, "alt": 931.13}
 
 # --- Tracking dynamics (snappy but safe) --- (Jump the values to 300-360, but can make it jerky or jumpy)
 AZ_MAX_DEG_PER_SEC   = 240.0     # how fast the ANTENNA may rotate
 EL_MAX_DEG_PER_SEC   = 240.0
 # these convert to per-tick steps using your UPDATE_PERIOD_S
+
+# --- Back-side flip logic (lets a 180° servo avoid wrap jumps) ---
+ALLOW_BACKSIDE_FLIP = True      # set False if your antenna cannot be used backwards
+FLIP_HYSTERESIS_DEG = 8.0       # require this servo-deg benefit to switch to the flipped pose | If you notice “flip thrash” when hovering near the seam, you can increase:
+
 
 # ===================== Helpers =====================
 
@@ -110,6 +115,37 @@ def servo_deg_to_us(deg: float) -> float:
     rng = float(SERVO_RANGE_DEG)
     d = max(0.0, min(rng, float(deg)))
     return mn + (d / rng) * (mx - mn)
+
+def choose_flipped_if_better(cal_az: float, cal_el: float,
+                             last_saz: float, last_sel: float) -> Tuple[float, float, bool]:
+    """
+    From calibrated world angles, choose either:
+      A) normal pointing  (az, el)
+      B) backside pointing (az+180, 180-el)
+    Return the chosen PHYSICAL angles (clamped) and a boolean used_flip.
+    We pick the option that minimizes servo movement from last_saz/last_sel,
+    with a small hysteresis so we don't thrash.
+    """
+    # Candidate A: normal
+    A_az, A_el = world_to_physical(cal_az, cal_el)
+    A_saz, A_sel = physical_to_servo_deg(A_az, A_el)
+    A_cost = abs(A_saz - last_saz) + abs(A_sel - last_sel)
+
+    if not ALLOW_BACKSIDE_FLIP:
+        return A_az, A_el, False
+
+    # Candidate B: backside (mirror elevation, rotate az by 180)
+    B_az = (A_az + 180.0) % 360.0
+    B_el = max(EL_PHYS_MIN, min(EL_PHYS_MAX, 180.0 - A_el))
+    B_saz, B_sel = physical_to_servo_deg(B_az, B_el)
+    B_cost = abs(B_saz - last_saz) + abs(B_sel - last_sel)
+
+    # Only switch if clearly better by margin
+    if B_cost + FLIP_HYSTERESIS_DEG < A_cost:
+        return B_az, B_el, True
+    else:
+        return A_az, A_el, False
+
 
 # ===================== Thread-safe latest GPS =====================
 
@@ -299,8 +335,9 @@ def log_open(prefix="Tracker"):
             "PhysAz","PhysEl","ServoAz","ServoEl","Az(us)","El(us)",
             "DroneLat","DroneLon","DroneAlt",
             "BaseLat","BaseLon","BaseAlt",
-            "BaseLatSDm","BaseLonSDm","BaseFix","BaseSats"
-        ])
+            "BaseLatSDm","BaseLonSDm","BaseFix","BaseSats",
+            "UsedFlip"])
+
         print(f"[INFO] CSV log → {fn}")
     if LOG_RAW_GPS:
         fnr = pathlib.Path(f"Tracker_Logs/{prefix}_RAW_{ts}.csv")
@@ -386,10 +423,14 @@ def main():
     phys_az0, phys_el0 = world_to_physical(cal_az0, cal_el0)
     s_az0, s_el0 = physical_to_servo_deg(phys_az0, phys_el0)
     smooth_park(pi, s_az0, s_el0, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
-    time.sleep(0.1)  # small settle
-
+    time.sleep(0.1)
     curr_phys_az = phys_az0
     curr_phys_el = phys_el0
+
+    # NEW: seed last-servo to match actual parked position
+    last_servo_az = float(s_az0)
+    last_servo_el = float(s_el0)
+
 
     # Start readers
     if args.mode == "sim":
@@ -425,8 +466,8 @@ def main():
     time.sleep(4.0)
 
     next_print = time.time()
-    last_servo_az = 0.0
-    last_servo_el = 0.0
+    #last_servo_az = 0.0
+    #last_servo_el = 0.0
 
     try:
         while True:
@@ -473,9 +514,11 @@ def main():
             world_az = abs_az
             world_el = abs_el
 
-            # --- Calibration → desired physical angles (targets) ---
-            cal_az, cal_el        = apply_calibration(world_az, world_el)
-            tgt_phys_az, tgt_phys_el = world_to_physical(cal_az, cal_el)
+            # --- Calibration → pick normal vs backside by servo-distance ---
+            cal_az, cal_el = apply_calibration(world_az, world_el)
+            tgt_phys_az, tgt_phys_el, used_flip = choose_flipped_if_better(
+                cal_az, cal_el, last_servo_az, last_servo_el
+            )
 
             # --- Per-tick max step (deg/tick) using the current update period ---
             az_step_max = float(AZ_MAX_DEG_PER_SEC) * float(args.update_period)
@@ -508,10 +551,11 @@ def main():
             # Console output (paced)
             if time.time() >= next_print:
                 print(f"[{datetime.now():%H:%M:%S}] Base={base_mode_str} "
-                        f"WORLD {world_az:6.2f}/{world_el:5.2f}° | "
-                        f"PHYS {curr_phys_az:6.2f}/{curr_phys_el:5.2f}° | "
-                        f"SERVO {s_az:6.2f}/{s_el:5.2f}° | µs {us_az:5.0f}/{us_el:5.0f}")
-
+                    f"WORLD {world_az:6.2f}/{world_el:5.2f}° | "
+                    f"PHYS {curr_phys_az:6.2f}/{curr_phys_el:5.2f}° | "
+                    f"SERVO {s_az:6.2f}/{s_el:5.2f}° | us {us_az:5.0f}/{us_el:5.0f}"
+                    f"{' | FLIP' if used_flip else ''}")
+                next_print += float(args.print_period)
 
             # CSV log
             log_row(
@@ -526,7 +570,8 @@ def main():
                 round(b_lat,7), round(b_lon,7), round(b_alt,2),
                 0.0, 0.0,
                 "" if base_fix is None else base_fix,
-                "" if base_sats is None else base_sats
+                "" if base_sats is None else base_sats,
+                1 if used_flip else 0    
             )
 
             time.sleep(args.update_period)
