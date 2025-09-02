@@ -56,13 +56,13 @@ SERVO_AZ_PIN = 18
 SERVO_EL_PIN = 17
 
 # Loop timings
-UPDATE_PERIOD_S = 0.02   # main loop period; try 0.02–0.05 for snappier updates
-PRINT_PERIOD_S  = 0.5
+UPDATE_PERIOD_S = 0.05   # main loop period; try 0.02–0.05 for snappier updates
+PRINT_PERIOD_S  = 1.0
 LOG_TO_CSV      = True
 LOG_RAW_GPS     = False # Make sure to remove once everything works. Most useless feature youve added *smh smh*
 
 # SIM base (used only in SIM mode)
-base_static = {"lat": 13.0321826, "lon": 77.5630286, "alt": 931.13}
+base_static = {"lat": 13.0328385, "lon": 77.5635463, "alt": 931.13}
 
 # --- Tracking dynamics (snappy but safe) --- (Jump the values to 300-360, but can make it jerky or jumpy)
 AZ_MAX_DEG_PER_SEC   = 240.0     # how fast the ANTENNA may rotate
