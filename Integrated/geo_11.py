@@ -69,9 +69,25 @@ AZ_MAX_DEG_PER_SEC   = 240.0     # how fast the ANTENNA may rotate
 EL_MAX_DEG_PER_SEC   = 240.0
 # these convert to per-tick steps using your UPDATE_PERIOD_S
 
-# --- Back-side flip logic (lets a 180° servo avoid wrap jumps) ---
-ALLOW_BACKSIDE_FLIP = True      # set False if your antenna cannot be used backwards
-FLIP_HYSTERESIS_DEG = 8.0       # require this servo-deg benefit to switch to the flipped pose | If you notice “flip thrash” when hovering near the seam, you can increase:
+# ---- put these near your other config constants (module scope) ----
+ALLOW_BACKSIDE_FLIP = True
+FLIP_HYSTERESIS_DEG = 10.0      # 8–12 is typical
+
+# Flip behavior tuning
+ONLY_FLIP_NEAR_EDGE = True      # prefer front pose away from the seam
+EDGE = 12.0                     # servo-deg from 0/180 that “arms” seam logic
+MIN_EL_FOR_FLIP = 5.0           # avoid flips at extreme elevation
+MAX_EL_FOR_FLIP = 175.0
+
+# Cost weighting: make azimuth more important than elevation near the seam
+AZ_WEIGHT = 1.0
+EL_WEIGHT = 0.30                # 0.25–0.35 works well
+
+# Flip style & tiny per-flip corrections (physical degrees)
+# If your rig wants “mirror elevation” use mirror_el; else try keep_el.
+FLIP_STYLE = "mirror_el"        # "mirror_el" or "keep_el"
+FLIP_AZ_CORR_DEG = 0.0          # add/subtract small az bias ONLY when flipped
+FLIP_EL_CORR_DEG = 0.0          # add/subtract small el bias ONLY when flipped
 
 
 # ===================== Helpers =====================
@@ -119,49 +135,58 @@ def servo_deg_to_us(deg: float) -> float:
 def choose_flipped_if_better(cal_az: float, cal_el: float,
                              last_saz: float, last_sel: float) -> Tuple[float, float, bool]:
     """
-    From calibrated world angles, choose either:
-      A) normal pointing  (az, el)
-      B) backside pointing (az+180, 180-el)
-    Return the chosen PHYSICAL angles (clamped) and a boolean used_flip.
-    We pick the option that minimizes servo movement from last_saz/last_sel,
-    with a small hysteresis so we don't thrash.
+    Decide between:
+      A) normal: (az, el)
+      B) backside: (az+180, 180-el) [or keep_el style]
+    Return chosen PHYSICAL angles and used_flip flag.
     """
-    AZ_WEIGHT = 1.0
-    EL_WEIGHT = 0.30        # 0.25–0.35 is a good range
-    EDGE = 12.0             # servo-deg from 0/180 that arms the seam logic
-    MIN_EL_FOR_FLIP = 3.0   # don’t flip if elevation is extremely close to 0/180
-
-    # Candidate A: normal
+    # Candidate A: normal (already calibrated)
     A_az, A_el = world_to_physical(cal_az, cal_el)
     A_saz, A_sel = physical_to_servo_deg(A_az, A_el)
-    A_cost = abs(A_saz - last_saz) + abs(A_sel - last_sel)
 
     if not ALLOW_BACKSIDE_FLIP:
         return A_az, A_el, False
 
-    # Candidate B: backside (mirror elevation, rotate az by 180)
-    B_az = (A_az + 180.0) % 360.0
-    B_el = max(EL_PHYS_MIN, min(EL_PHYS_MAX, 180.0 - A_el))
-    B_saz, B_sel = physical_to_servo_deg(B_az, B_el)
-    B_cost = abs(B_saz - last_saz) + abs(B_sel - last_sel)
+    # Candidate B: backside
+    if FLIP_STYLE == "mirror_el":
+        B_az = (A_az + 180.0 + FLIP_AZ_CORR_DEG) % 360.0
+        B_el = 180.0 - A_el + FLIP_EL_CORR_DEG
+    else:  # "keep_el"
+        B_az = (A_az + 180.0 + FLIP_AZ_CORR_DEG) % 360.0
+        B_el = A_el + FLIP_EL_CORR_DEG
 
+    # Clamp B to physical limits
+    B_el = max(EL_PHYS_MIN, min(EL_PHYS_MAX, B_el))
+    B_az = (B_az + 360.0) % 360.0
+
+    B_saz, B_sel = physical_to_servo_deg(B_az, B_el)
+
+    # Weighted costs (servo-space deltas)
     A_cost = AZ_WEIGHT * abs(A_saz - last_saz) + EL_WEIGHT * abs(A_sel - last_sel)
     B_cost = AZ_WEIGHT * abs(B_saz - last_saz) + EL_WEIGHT * abs(B_sel - last_sel)
 
-    # Arm seam logic only near edges and if the normal candidate would "cross" to the opposite edge
+    # Edge gating (optional): only allow flips near a seam
     near_edge = (last_saz < EDGE) or (last_saz > 180.0 - EDGE)
-    crosses_edge = (last_saz < EDGE and A_saz > 180.0 - EDGE) or (last_saz > 180.0 - EDGE and A_saz < EDGE)
+    if ONLY_FLIP_NEAR_EDGE and not near_edge:
+        # Away from seam, stay in front unless backside is decisively better
+        if B_cost + FLIP_HYSTERESIS_DEG < A_cost:
+            return B_az, B_el, True
+        else:
+            return A_az, A_el, False
 
-    # Elevation safety: avoid flips at extreme el unless you KNOW it’s safe mechanically
-    el_ok = (A_el >= MIN_EL_FOR_FLIP) and (A_el <= 180.0 - MIN_EL_FOR_FLIP)
+    # Seam crossing detection: would normal candidate jump edges?
+    crosses_edge = ((last_saz < EDGE and A_saz > 180.0 - EDGE) or
+                    (last_saz > 180.0 - EDGE and A_saz < EDGE))
 
-    # Seam override: if we're about to teleport the az servo, prefer the back-side even if margin not met
+    # Elevation guardrail for flips
+    el_ok = (A_el >= MIN_EL_FOR_FLIP) and (A_el <= MAX_EL_FOR_FLIP)
+
+    # Seam override: if about to teleport az, prefer backside (allow equal-cost flip)
     if near_edge and crosses_edge and el_ok:
-        # Either B is already better, or allow a small "assist" by ignoring hysteresis here
         if (B_cost <= A_cost) or (B_cost + FLIP_HYSTERESIS_DEG <= A_cost):
             return B_az, B_el, True
 
-    # Normal hysteresis (sticky) behavior elsewhere
+    # Normal hysteresis elsewhere
     if B_cost + FLIP_HYSTERESIS_DEG < A_cost:
         return B_az, B_el, True
     else:

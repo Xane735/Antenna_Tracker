@@ -47,7 +47,7 @@ PULSE_MAX_US    = 2100.0
 SERVO_RANGE_DEG = 180.0
 
 # Calibration
-AZIMUTH_ZERO_OFFSET_DEG   = -30.0
+AZIMUTH_ZERO_OFFSET_DEG   = 0.0
 ELEVATION_ZERO_OFFSET_DEG = 0.0
 AZIMUTH_INVERT   = True
 ELEVATION_INVERT = False
@@ -358,7 +358,7 @@ def main():
     PULSE_MAX_US  = float(PULSE_MAX_US)
 
     print("Checking GPS streams...")
-    gps_check.gps_check()
+    #gps_check.gps_check()
     time.sleep(2.0)
 
     print("=== geo_10 (sim/ground) — static/dynamic base, zero-ref, smooth parking — NO FILTERING ===")
