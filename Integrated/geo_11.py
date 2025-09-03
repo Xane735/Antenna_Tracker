@@ -65,9 +65,14 @@ LOG_RAW_GPS     = False # Make sure to remove once everything works. Most useles
 base_static = {"lat": 13.0276802, "lon": 77.5629616, "alt": 924.36}
 
 # --- Tracking dynamics (snappy but safe) --- (Jump the values to 300-360, but can make it jerky or jumpy)
-AZ_MAX_DEG_PER_SEC   = 240.0     # how fast the ANTENNA may rotate
-EL_MAX_DEG_PER_SEC   = 240.0
+AZ_MAX_DEG_PER_SEC   = 180.0     # how fast the ANTENNA may rotate
+EL_MAX_DEG_PER_SEC   = 180.0
 # these convert to per-tick steps using your UPDATE_PERIOD_S
+
+# --- Flip cooldown / stickiness (MUST be defined) ---
+MIN_FLIP_DWELL_S            = 1.5   # block any re-flip for 1.5 s
+MIN_AZ_DELTA_SINCE_FLIP_DEG = 18.0  # need to move away from seam this much before reconsidering
+FLIP_EXTRA_MARGIN_DEG       = 12.0  # extra benefit required to flip to the other side
 
 ALLOW_BACKSIDE_FLIP = True    # Master switch for the flip logic. To be disabled if the drone isnt going to fly beyond 180 degrees elevation
 
@@ -79,11 +84,10 @@ Hysteresis prevents the tracker from rapidly flipping back and forth if the dron
  """
 # Flip behavior tuning
 ONLY_FLIP_NEAR_EDGE  = True    # KEEP THIS TRUE or you will break the tracker :)
-EDGE                 = 3.0    # How close to the edge will the tracker flip. 
+EDGE                 = 28.0    # How close to the edge will the tracker flip. 
 FLIP_HYSTERESIS_DEG  = 14.0     # was 10.0; lets the new side win sooner
 """ Edit this if the elvation is passing through the tracker """
-MIN_EL_FOR_FLIP      = 0.0     # unchanged; don’t flip when grazing the horizon
-MIN_EL_FOR_FLIP = 6.0  # or 8–10 if your horizon is messy
+MIN_EL_FOR_FLIP      = 6.0     # unchanged; don’t flip when grazing the horizon
 
 # Cost weighting: make azimuth more important than elevation near the seam
 """
@@ -97,7 +101,7 @@ EL_WEIGHT = 0.30                # 0.25–0.35 works well
 # If your rig wants “mirror elevation” use mirror_el; else try keep_el. Play with this if the elevation seems off after a flip.
 FLIP_STYLE = "keep_el"          # "mirror_el" or "keep_el"
 """ Edit these paramters to add a small bias to the azimuth/elevation ONLY when a flip occurs."""
-FLIP_AZ_CORR_DEG = 20.0          # add/subtract small az bias ONLY when flipped
+FLIP_AZ_CORR_DEG = 0.0          # add/subtract small az bias ONLY when flipped
 FLIP_EL_CORR_DEG = 0.0          # add/subtract small el bias ONLY when flipped
 
 
@@ -228,10 +232,9 @@ def choose_flipped_if_better(A_saz, B_saz, cost_A, cost_B, only_flip_near_edge=T
         # wrap to [-180, 180)
         return ((x + 180.0) % 360.0) - 180.0
 
-    def near_edge(saz):
-        s = abs(wrap180(saz))
-        # near 0° OR near 180°?
-        return (s <= EDGE) or (abs(s - 180.0) <= EDGE)
+    def near_edge(saz: float) -> bool:
+    # seam is at 0° and 180° in SERVO space
+        return (saz <= EDGE) or (saz >= (180.0 - EDGE))
 
     # Gate flipping
     allow_flip = True
