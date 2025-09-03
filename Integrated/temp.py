@@ -36,17 +36,17 @@ EL_GEAR_RATIO  = SPOKES_BIG / SPOKES_SMALL    # default 2.0
 
 # Physical limits
 AZ_PHYS_MIN = 0.0
-AZ_PHYS_MAX = 360.0
+AZ_PHYS_MAX = 430.0
 EL_PHYS_MIN = 0.0
 EL_PHYS_MAX = 180.0
 
 # Servo mapping — 180° servo
 PULSE_MIN_US    = 900.0
 PULSE_MAX_US    = 2100.0
-SERVO_RANGE_DEG = 180.0
+SERVO_RANGE_DEG = 215.0
 
 # Calibration
-AZIMUTH_ZERO_OFFSET_DEG   = -30.0
+AZIMUTH_ZERO_OFFSET_DEG   = 100.0
 ELEVATION_ZERO_OFFSET_DEG = 0.0
 AZIMUTH_INVERT   = True
 ELEVATION_INVERT = False
@@ -56,49 +56,22 @@ SERVO_AZ_PIN = 18
 SERVO_EL_PIN = 17
 
 # Loop timings
-UPDATE_PERIOD_S = 0.09   # main loop period; try 0.02–0.05 for snappier updates
+UPDATE_PERIOD_S = 0.05   # main loop period; try 0.02–0.05 for snappier updates
 PRINT_PERIOD_S  = 1.0
 LOG_TO_CSV      = True
 LOG_RAW_GPS     = False # Make sure to remove once everything works. Most useless feature youve added *smh smh*
 
 # SIM base (used only in SIM mode)
-base_static = {"lat": 13.0276802, "lon": 77.5629616, "alt": 924.36}
+base_static = {"lat": 13.0276175, "lon": 77.5629830, "alt": 931.13}
 
 # --- Tracking dynamics (snappy but safe) --- (Jump the values to 300-360, but can make it jerky or jumpy)
 AZ_MAX_DEG_PER_SEC   = 240.0     # how fast the ANTENNA may rotate
 EL_MAX_DEG_PER_SEC   = 240.0
 # these convert to per-tick steps using your UPDATE_PERIOD_S
 
-ALLOW_BACKSIDE_FLIP = True    # Master switch for the flip logic. To be disabled if the drone isnt going to fly beyond 180 degrees elevation
-
-""" 
-Hysteresis prevents the tracker from rapidly flipping back and forth if the drone is hovering right at a point where both the front and back poses are equally "good."
- It makes the current pose "stickier" by adding a penalty to the alternative.
- The tracker will only flip if the backside pose is at least 10 servo degrees cheaper in movement than staying in the front pose.
- If you see it oscillating or "hesitating" at the flip point, increase this value. If it seems reluctant to flip when it should, decrease it.
- """
-# Flip behavior tuning
-ONLY_FLIP_NEAR_EDGE  = True    # KEEP THIS TRUE or you will break the tracker :)
-EDGE                 = 3.0    # How close to the edge will the tracker flip. 
-FLIP_HYSTERESIS_DEG  = 14.0     # was 10.0; lets the new side win sooner
-""" Edit this if the elvation is passing through the tracker """
-MIN_EL_FOR_FLIP      = 0.0     # unchanged; don’t flip when grazing the horizon
-MIN_EL_FOR_FLIP = 6.0  # or 8–10 if your horizon is messy
-
-# Cost weighting: make azimuth more important than elevation near the seam
-"""
-The defaults are usually good. 
-If you want to make flips happen more readily, you could slightly decrease EL_WEIGHT (e.g., to 0.25) to make elevation movements even "cheaper" in the cost calculation.
-"""
-AZ_WEIGHT = 1.0
-EL_WEIGHT = 0.30                # 0.25–0.35 works well
-
-# Flip style & tiny per-flip corrections (physical degrees)
-# If your rig wants “mirror elevation” use mirror_el; else try keep_el. Play with this if the elevation seems off after a flip.
-FLIP_STYLE = "keep_el"          # "mirror_el" or "keep_el"
-""" Edit these paramters to add a small bias to the azimuth/elevation ONLY when a flip occurs."""
-FLIP_AZ_CORR_DEG = 20.0          # add/subtract small az bias ONLY when flipped
-FLIP_EL_CORR_DEG = 0.0          # add/subtract small el bias ONLY when flipped
+# --- Back-side flip logic (lets a 180° servo avoid wrap jumps) ---
+ALLOW_BACKSIDE_FLIP = True      # set False if your antenna cannot be used backwards
+FLIP_HYSTERESIS_DEG = 8.0       # require this servo-deg benefit to switch to the flipped pose | If you notice “flip thrash” when hovering near the seam, you can increase:
 
 
 # ===================== Helpers =====================
@@ -143,120 +116,35 @@ def servo_deg_to_us(deg: float) -> float:
     d = max(0.0, min(rng, float(deg)))
     return mn + (d / rng) * (mx - mn)
 
-def clamp_physical(az, el):
-    # clamp to your physical pan-tilt range; typical: el 0..180, az unbounded
-    el = max(0.0, min(180.0, el))
-    return az, el
-
-def shortest_servo_delta(a, b):
-    """Return signed shortest delta between two servo angles in [0,180].
-       For 0-180 servos, this is just b - a (no wrap), but keep the helper
-       in case you later map to a 0-360 continuous az servo."""
-    return b - a
-
-def pick_target(cal_az, cal_el, last_servo_az, last_servo_el):
-    """Return (tgt_phys_az, tgt_phys_el, used_flip) after computing A/B options & costs."""
-    # --- Build the two candidate poses in WORLD/PHYS/SE RVO space ---
-    # A: normal
+def choose_flipped_if_better(cal_az: float, cal_el: float,
+                             last_saz: float, last_sel: float) -> Tuple[float, float, bool]:
+    """
+    From calibrated world angles, choose either:
+      A) normal pointing  (az, el)
+      B) backside pointing (az+180, 180-el)
+    Return the chosen PHYSICAL angles (clamped) and a boolean used_flip.
+    We pick the option that minimizes servo movement from last_saz/last_sel,
+    with a small hysteresis so we don't thrash.
+    """
+    # Candidate A: normal
+    A_az, A_el = world_to_physical(cal_az, cal_el)
+    A_saz, A_sel = physical_to_servo_deg(A_az, A_el)
+    A_cost = abs(A_saz - last_saz) + abs(A_sel - last_sel)
 
     if not ALLOW_BACKSIDE_FLIP:
-        A_phys_az, A_phys_el = world_to_physical(cal_az, cal_el)
-        return A_phys_az, A_phys_el, False
+        return A_az, A_el, False
 
-    A_world_az, A_world_el = cal_az, cal_el
+    # Candidate B: backside (mirror elevation, rotate az by 180)
+    B_az = (A_az + 180.0) % 360.0
+    B_el = max(EL_PHYS_MIN, min(EL_PHYS_MAX, 180.0 - A_el))
+    B_saz, B_sel = physical_to_servo_deg(B_az, B_el)
+    B_cost = abs(B_saz - last_saz) + abs(B_sel - last_sel)
 
-    # B: backside (180° az shift; keep or mirror EL per your setting)
-    B_world_az = wrap360(cal_az + 180.0)
-    if FLIP_STYLE == "mirror_el":
-        B_world_el = max(EL_PHYS_MIN, min(EL_PHYS_MAX, 180.0 - cal_el))
+    # Only switch if clearly better by margin
+    if B_cost + FLIP_HYSTERESIS_DEG < A_cost:
+        return B_az, B_el, True
     else:
-        B_world_el = cal_el
-
-    # Small per-flip nudges (applied only if we actually flip later)
-    def _apply_flip_corr(az, el):
-        return wrap360(az + FLIP_AZ_CORR_DEG), max(EL_PHYS_MIN, min(EL_PHYS_MAX, el + FLIP_EL_CORR_DEG))
-
-    # Map to PHYSICAL then SERVO for cost calc
-    A_phys_az, A_phys_el = world_to_physical(A_world_az, A_world_el)
-    B_phys_az, B_phys_el = world_to_physical(B_world_az, B_world_el)
-    A_saz, A_sel = physical_to_servo_deg(A_phys_az, A_phys_el)
-    B_saz, B_sel = physical_to_servo_deg(B_phys_az, B_phys_el)
-
-    # Costs in SERVO degrees (what your motors actually move)
-    cost_A = AZ_WEIGHT * abs(A_saz - last_servo_az) + EL_WEIGHT * abs(A_sel - last_servo_el)
-    cost_B = AZ_WEIGHT * abs(B_saz - last_servo_az) + EL_WEIGHT * abs(B_sel - last_servo_el)
-
-    # Respect horizon guard if you use it
-    if B_world_el < MIN_EL_FOR_FLIP:
-        used_flip = False
-        return A_phys_az, A_phys_el, used_flip
-
-    # Don’t allow flips far from seam if that’s your policy
-    only_near_edge = ONLY_FLIP_NEAR_EDGE
-
-    # Decide flip using the patched chooser
-    used_flip, _chosen_saz = choose_flipped_if_better(A_saz, B_saz, cost_A, cost_B, only_flip_near_edge=only_near_edge)
-
-    if used_flip:
-        # Apply small corrections only when committing to flip
-        B_world_az_corr, B_world_el_corr = _apply_flip_corr(B_world_az, B_world_el)
-        B_phys_az, B_phys_el = world_to_physical(B_world_az_corr, B_world_el_corr)
-        return B_phys_az, B_phys_el, True
-    else:
-        return A_phys_az, A_phys_el, False
-
-
-def choose_flipped_if_better(A_saz, B_saz, cost_A, cost_B, only_flip_near_edge=True):
-    """
-    Decide whether to flip sides. Returns (use_flip: bool, chosen_saz: float)
-
-    A_saz: current-side azimuth solution (deg)
-    B_saz: flipped-side azimuth solution (deg)
-    cost_A, cost_B: your existing cost values for A and B
-    only_flip_near_edge: keep your existing behavior of allowing flips
-                         only near the 0°/180° seam when True
-    """
-    import time
-    now = time.time()
-
-    # persistent state stored on the function itself
-    st = choose_flipped_if_better.__dict__
-    last_flip_t = st.get("_last_flip_t", 0.0)
-    last_flip_saz = st.get("_last_flip_saz", None)
-
-    def wrap180(x):
-        # wrap to [-180, 180)
-        return ((x + 180.0) % 360.0) - 180.0
-
-    def near_edge(saz):
-        s = abs(wrap180(saz))
-        # near 0° OR near 180°?
-        return (s <= EDGE) or (abs(s - 180.0) <= EDGE)
-
-    # Gate flipping
-    allow_flip = True
-    if only_flip_near_edge:
-        allow_flip = near_edge(A_saz) or near_edge(B_saz)
-
-    # time-based cooldown
-    if (now - last_flip_t) < MIN_FLIP_DWELL_S:
-        allow_flip = False
-
-    # movement-based cooldown (don't re-flip until we moved away from seam)
-    if last_flip_saz is not None:
-        if abs(B_saz - last_flip_saz) < MIN_AZ_DELTA_SINCE_FLIP_DEG:
-            allow_flip = False
-
-    # Stronger "stickiness": add hysteresis + extra margin to B
-    thresholded_cost_B = cost_B + FLIP_HYSTERESIS_DEG + FLIP_EXTRA_MARGIN_DEG
-
-    if allow_flip and (thresholded_cost_B < cost_A):
-        # commit to flip and remember time/angle
-        st["_last_flip_t"] = now
-        st["_last_flip_saz"] = B_saz
-        return True, B_saz
-    else:
-        return False, A_saz
+        return A_az, A_el, False
 
 
 # ===================== Thread-safe latest GPS =====================
@@ -628,7 +516,9 @@ def main():
 
             # --- Calibration → pick normal vs backside by servo-distance ---
             cal_az, cal_el = apply_calibration(world_az, world_el)
-            tgt_phys_az, tgt_phys_el, used_flip = pick_target(cal_az, cal_el, last_servo_az, last_servo_el)
+            tgt_phys_az, tgt_phys_el, used_flip = choose_flipped_if_better(
+                cal_az, cal_el, last_servo_az, last_servo_el
+            )
 
             # --- Per-tick max step (deg/tick) using the current update period ---
             az_step_max = float(AZ_MAX_DEG_PER_SEC) * float(args.update_period)
