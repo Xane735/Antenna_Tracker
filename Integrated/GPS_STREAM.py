@@ -4,7 +4,7 @@ from pymavlink import mavutil
 import sys
 
 # Global lists for ports and baud rates
-Port1 = "/dev/ttyACM0"
+Port1 = "/dev/ttyACM1"
 Port2 = "/dev/ttyUSB0"
 #Port3 = "/dev/ttyUSB0"
 baud_rate = 57600
