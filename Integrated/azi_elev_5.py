@@ -129,16 +129,6 @@ def adjust_angles_for_servo_limits(azimuth, elevation):
     if elevation < 0:
         # Option 1: Clamp to horizon
         elevation = 0.0
-        
-        # Option 2: Point to opposite azimuth (uncomment if needed)
-        # azimuth = (azimuth + 180) % 360
-        # elevation = abs(elevation)
-    
-    # Apply azimuth limits if your servo has restricted rotation
-    # Uncomment and adjust if your azimuth servo has limits
-    # min_azimuth = 0.0
-    # max_azimuth = 360.0
-    # azimuth = max(min_azimuth, min(max_azimuth, azimuth))
     
     return round(azimuth, 2), round(elevation, 2)
 
