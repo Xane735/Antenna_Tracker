@@ -20,9 +20,9 @@ BASE_MODE_DEFAULT = "static"     # "static" (freeze after 10s) or "dynamic"
 # --- Endpoints ---
 SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14550"
 SIM_DRONE_BAUD     = None
-DRONE_ENDPOINT     = "/dev/ttyUSB1"
+DRONE_ENDPOINT     = "/dev/ttyUSB0"
 DRONE_BAUD         = 57600
-BASE_ENDPOINT      = "/dev/ttyACM1"
+BASE_ENDPOINT      = "/dev/ttyACM0"
 BASE_BAUD          = 57600
 
 # MAVLink stream requests
@@ -47,7 +47,7 @@ PULSE_MAX_US    = 1950.0 # microseconds
 SERVO_RANGE_DEG = 180.0  # degrees
 
 # Calibration
-AZIMUTH_ZERO_OFFSET_DEG   = 0.0     # deg
+AZIMUTH_ZERO_OFFSET_DEG   = -60.0     # deg
 ELEVATION_ZERO_OFFSET_DEG = 0.0     # deg
 AZIMUTH_INVERT   = True             
 ELEVATION_INVERT = True
