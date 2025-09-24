@@ -5,7 +5,7 @@ import pigpio
 
 pulses_us = [900, 1050, 1200, 1350, 1500, 1650, 1800, 1950, 2100]
 
-def set_pulse_and_wait(pi, pins, pulse_us, delay=2):
+def set_pulse_and_wait(pi, pins, pulse_us, delay = 2):
     for pin in pins:
         pi.set_servo_pulsewidth(pin, pulse_us)
     
@@ -18,7 +18,7 @@ def run_sweep(pi, pins, start_us, end_us, step_us):
                   list(range(end_us - step_us, start_us - step_us, -step_us))
     
     for pulse in sweep_range:
-        set_pulse_and_wait(pi, pins, pulse, delay=0.05)
+        set_pulse_and_wait(pi, pins, pulse, delay = 1)
     
     print("\nDone with sweeping.")
 
