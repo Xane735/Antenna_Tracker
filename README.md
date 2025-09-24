@@ -1,104 +1,161 @@
-**Instructions to Install Mavproxy onto Raspian OS:**
+# MAVLink GPS Antenna Tracker
 
-````bash
- sudo apt-get install python3-dev python3-opencv python3-wxgtk4.0 python3-pip python3-matplotlib python3-lxml python3-pygame
- python3 -m pip install PyYAML mavproxy --user
- echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
- ```
+A high-performance, Raspberry Pi-based antenna tracker for automatically pointing a directional antenna at a drone. It uses MAVLink GPS data from both the ground station (base) and the drone to calculate the required azimuth and elevation, driving two servos for precise positioning.
 
-If you get a “permission denied” error message when connecting to serial devices, the user permissions may need to be changed:
 
-```bash
- sudo usermod -a -G dialout <username>
-````
+## Features
+Dual MAVLink GPS Input: Utilizes GPS data from both the drone and a ground-based receiver for accurate relative positioning.
 
-1. Install python virtual environment:
+1. Multiple Operating Modes:
 
-   ```bash
-   sudo apt-get install python3-venv
-   ```
+Ground Mode : For live operation with physical hardware.
+             - Static Mode: Locks onto the base station's position after a fixed time.
+             - Dynamic Mode: Uses real time live positioning of base station.
 
-2. Create a virtual environment (name it anything like mavproxy-env):
+Sim Mode: For testing and simulation without hardware, uses hardcoded GPS coordinates for the base sation.
 
-   ```bash
-   python3 -m venv mavproxy-env
-   ```
+2. Flexible Base Station Modes:
 
-3. Activate virtual environment:
+Static: Averages the base station's position for a few seconds upon startup and then locks it, ideal for fixed setups.
 
-   ```bash
-   source mavproxy-env/bin/activate
-   ```
+Dynamic: Continuously uses the latest GPS data from the base, suitable for moving ground stations.
 
-4. You should see your terminal change:
-   (mavproxy-env) user@your-pi:~$
+Advanced Overhead Tracking ("Backside Flip"): Decides whether to track the drone from the "front" (0-180° azimuth) or "back" (180-360° azimuth) by rotating 180°, ensuring continuous tracking even when the drone flies directly overhead and behind the tracker.
 
-5. Now install the packages:
+3. Smooth & Stable Motion:
 
-   ```bash
-   pip install PyYAML mavproxy
-   ```
+*Hysteresis & Cooldowns*: Prevents rapid, oscillating movements when the drone is near a flip point.
 
-6. Run mavproxy from inside the environment:
+*Rate Limiting*: Caps the maximum rotational speed of the servos to avoid sudden jumps.
 
-   ```bash
-   mavproxy.py --master=/dev/ttyUSB0 --baudrate 57600
-   ```
+*Smooth Parking*: Gently moves servos to a defined home or last-known position on startup and shutdown.
 
-7. To exit the virtual environment:
-   ```linux
-   deactivate
-   ```
-   Enable access to global packaged (if required):
-   python3 -m venv --system-site-packages mavproxy-env
+*Highly Configurable*: Easily adjust gear ratios, servo pulse widths, physical limits, calibration offsets, and tracking dynamics directly in the script.
 
-To find all ports connected:
-ls /dev/ttyUSB\*
-Auto detect port:
-dmesg | grep tty
+*Data Logging*: Logs detailed tracking data (world angles, servo positions, GPS coordinates) and raw GPS messages to .csv files for analysis.
 
-To update an existing installation with the current release:
+# Hardware Requirements
+Raspberry Pi: Any model with GPIO pins should work (e.g., Pi 3B+, Pi 4).
 
-    python3 -m pip install mavproxy pymavlink --user --upgrade
+Pan-Tilt Mechanism: A 2-axis mount for your antenna.
 
-To detect the Port connected to the pixhawk:
-mavproxy.py --master=/dev/ttyUSB0
+Servos: Two standard servos for azimuth and elevation control.
 
-To set baudrate of the port communication:
-mavproxy.py --master=/dev/ttyUSB0
+MAVLink Radios:
 
------------------------------> GPS STREAM SET UP <-------------------------------------
+One telemetry radio (e.g., SiK radio) to receive the drone's MAVLink stream.
 
-1. Run SITL/ connect to the pixhawk on your GCS:
+One GPS receiver with a MAVLink-capable output (e.g., a U-Blox GPS configured to output MAVLink) for the base station.
 
-2. Hit Ctrl+F --> Select Mavlink --> Under First drop down select UDP client --> Input the IP address of the device and the port (14550) --> Hit connect
+Power Supply: A stable power source for the Raspberry Pi and servos.
 
-3. On raspi run:
-   mavproxy.py --master=udp:0.0.0.0:14550 --out=udp:192.168.1.193:14551
+BEC: One supplying 7.2V and another 5 V
 
-4. View GPS coordinates:
-   status
-   You will see messages like:
-   GPS: GPS lock: 3D fix
-   GPS HDOP: 1.2 sats: 10
-   Lat: 47.397742 Lon: 8.545594 Alt: 556.5
-   For Raw output of the GPS:
-   module load message
-   watch GPS_RAW_INT
+Logic Level Converter: 5V - 3V.
 
-5. Open another new terminal (Make sure to activate the environment). Run the python script.
+**Software & Installation**
+This project runs on Python and requires the pigpio library for hardware control.
 
-------------------------------> PID Tunning <------------------------------------------------
+Install pigpio Daemon: The pigpio library requires a system daemon to be running.
 
-1. Tune Kp:
-   Increase Kp gradually (e.g., 0.5 → 1.0 → 2.0).
-   Watch the antenna's movement: it should become more responsive.
-   Stop increasing if it starts oscillating.
-2. Add Damping with Kd:
-   Add a small Kd (e.g., 0.1 → 0.2).
-   This smooths out fast changes and reduces overshoot.
-   If it becomes too slow again, reduce Kd.
-   Fix small long-term errors with Ki:
-3. Add a small Ki (e.g., 0.01).
-   Only increase if your tracker settles slightly off-target and stays there.
-   Too much Ki causes instability over time.
+Bash
+
+# Update package lists
+```
+sudo apt-get update
+```
+# Install pigpio
+```
+sudo apt-get install pigpio
+```
+# Enable and start the daemon
+```
+sudo systemctl enable pigpiod
+sudo systemctl start pigpiod
+```
+Clone the Repository:
+
+Bash
+```
+git clone <your-repository-url>
+cd <your-repository-name>
+Set up a Python Environment: (Recommended)
+```
+Bash
+```
+python3 -m venv venv
+source venv/bin/activate
+```
+Install Dependencies:
+
+Bash
+```
+pip install pigpio pymavlink geopy
+```
+Configuration
+All primary configuration is done within the top section of the geo_13.py script. You must review and adjust these settings to match your specific hardware.
+
+Endpoints:
+
+DRONE_ENDPOINT: The serial port for your drone's telemetry radio (e.g., /dev/ttyUSB0).
+
+BASE_ENDPOINT: The serial port for your base station's GPS (e.g., /dev/ttyACM0).
+
+Hardware Mapping:
+
+SERVO_AZ_PIN, SERVO_EL_PIN: The GPIO pins your servos are connected to.
+
+AZ_GEAR_RATIO, EL_GEAR_RATIO: The gear ratio between your servo and the final output (e.g., 2.0 if a 12-tooth servo gear drives a 24-tooth platform gear).
+
+PULSE_MIN_US, PULSE_MAX_US: The minimum and maximum servo pulse widths in microseconds. Calibrate this to match your servo's 0° and 180° positions.
+
+Calibration:
+
+AZIMUTH_ZERO_OFFSET_DEG, ELEVATION_ZERO_OFFSET_DEG: Add a correction angle if your tracker's physical "zero" position is not perfectly aligned with true North.
+
+AZIMUTH_INVERT, ELEVATION_INVERT: Set to True if a servo is moving in the wrong direction.
+
+Flip Behavior Tuning:
+
+These parameters control the advanced "backside flip" logic. The defaults are a good starting point.
+
+FLIP_HYSTERESIS_DEG: Adds "stickiness" to the current tracking side to prevent rapid flipping if the drone is hovering at a seam.
+
+EDGE: How close to the 0° or 180° servo limit the tracker must be before a flip is considered.
+
+MIN_EL_FOR_FLIP: Prevents flipping if the drone is too low to the horizon.
+
+**Usage**
+Run the main script from the terminal. Use command-line arguments to override default behaviors.
+
+Bash
+```
+python geo_13.py --mode [mode] --base-mode [base_mode]
+```
+
+Key Arguments:
+```
+--mode: ground for real hardware (default) or sim for simulation.
+
+--base-mode: static (default) to lock the base position after 10 seconds, or dynamic to use a continuously moving base.
+
+--static-window-sec: The number of seconds to average the base GPS in static mode.
+
+--park-home-az, --park-home-el: The world angles (in degrees) to park the tracker at on shutdown.
+```
+
+Examples:
+Standard Ground Operation:
+(Uses a fixed base position after a 10-second calibration window)
+
+Bash
+```
+python geo_13.py --mode ground --base-mode static
+```
+Operation with a Moving Base Station:
+(For example, if the tracker is on a boat or car)
+
+Bash
+```
+python geo_13.py --mode ground --base-mode dynamic
+```
