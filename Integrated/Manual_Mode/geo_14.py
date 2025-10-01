@@ -8,7 +8,7 @@ from datetime import datetime
 import threading
 from typing import Optional, Tuple, Callable
 import time
-
+from tracker_ui_server import update_base_gps, update_drone_gps, update_tracker_state
 import pigpio
 from pymavlink import mavutil
 import azi_elev_5 as tracker
@@ -421,11 +421,17 @@ def set_latest_base(sample: GpsSample):
     global _latest_base
     with _base_lock:
         _latest_base = sample
+        update_drone_gps(sample.lat, sample.lon, sample.alt, 
+                       sample.eph, sample.epv, sample.fix_type, sample.sats)
+
 
 def set_latest_drone(sample: GpsSample):
     global _latest_drone
     with _drone_lock:
         _latest_drone = sample
+        update_drone_gps(sample.lat, sample.lon, sample.alt, 
+                       sample.eph, sample.epv, sample.fix_type, sample.sats)
+
 
 def get_latest_base() -> Optional[GpsSample]:
     with _base_lock:
@@ -627,6 +633,8 @@ def run_manual_loop(pi, args, state_reader, manual_ctrl,
             pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
             last_servo_az, last_servo_el = s_az, s_el
 
+            update_tracker_state(get_mode(), 0.0, 0.0, curr_phys_az, curr_phys_el)
+            
         # optional periodic console + CSV logging with latest telemetry
         info = state_reader()   # non-blocking snapshot
         if info and time.time() >= next_print:
@@ -726,6 +734,8 @@ def run_auto_tick(pi, args, last_servo_az, last_servo_el, curr_phys_az, curr_phy
     pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
     pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
     last_servo_az, last_servo_el = s_az, s_el
+    
+    update_tracker_state(get_mode(), world_az, world_el, curr_phys_az, curr_phys_el)
 
     # paced print
     now = time.time()

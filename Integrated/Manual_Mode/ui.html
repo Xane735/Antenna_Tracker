@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Antenna Tracker UI</title>
+    <link rel="stylesheet" href="ui.css">
+</head>
+</head>
+<body>
+    <div id="connection-status">
+        <span class="status-indicator status-disconnected" id="ws-indicator"></span>
+        <span id="ws-status">Connecting...</span>
+    </div>
+    
+    <div class="container">
+        <!-- Top Left: Map -->
+        <div class="panel">
+            <div class="panel-title">Map View</div>
+            <div id="map-container">
+                <div id="map-placeholder">
+                    <p>📍 Map Area</p>
+                    <p style="font-size: 12px; margin-top: 10px;">Place your local map image here</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Top Right: GPS Data -->
+        <div class="panel">
+            <div class="panel-title">GPS Telemetry</div>
+            
+            <div class="gps-section">
+                <h3>Base Station</h3>
+                <div class="data-grid">
+                    <div class="data-item">
+                        <div class="data-label">Latitude</div>
+                        <div class="data-value" id="base-lat">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">Longitude</div>
+                        <div class="data-value" id="base-lon">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">Altitude</div>
+                        <div class="data-value" id="base-alt">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">HDOP</div>
+                        <div class="data-value" id="base-eph">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">Fix Type</div>
+                        <div class="data-value" id="base-fix">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">Satellites</div>
+                        <div class="data-value" id="base-sats">--</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="gps-section">
+                <h3>Drone</h3>
+                <div class="data-grid">
+                    <div class="data-item">
+                        <div class="data-label">Latitude</div>
+                        <div class="data-value" id="drone-lat">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">Longitude</div>
+                        <div class="data-value" id="drone-lon">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">Altitude</div>
+                        <div class="data-value" id="drone-alt">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">HDOP</div>
+                        <div class="data-value" id="drone-eph">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">Azimuth</div>
+                        <div class="data-value value-good" id="tracker-az">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">Elevation</div>
+                        <div class="data-value value-good" id="tracker-el">--</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bottom Left: Reserved -->
+        <div class="panel">
+            <div class="panel-title">Reserved</div>
+            <div style="display: flex; align-items: center; justify-content: center; height: calc(100% - 40px); color: #555;">
+                Additional features coming soon
+            </div>
+        </div>
+        
+        <!-- Bottom Right: Manual Control -->
+        <div class="panel">
+            <div class="panel-title">Manual Control</div>
+            <div id="joystick-container">
+                <div id="joystick">
+                    <div id="joystick-handle"></div>
+                </div>
+                <div class="control-buttons">
+                    <button class="btn" onclick="toggleMode()">Toggle Mode</button>
+                    <button class="btn btn-primary" onclick="calibrate()">Calibrate</button>
+                </div>
+                <div style="margin-top: 15px; font-size: 12px; color: #666;">
+                    Mode: <span id="current-mode" style="color: #4ade80;">AUTO</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let ws;
+        let joystickActive = false;
+        let joystickCenter = { x: 0, y: 0 };
+        
+        // WebSocket connection
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+            
+            ws.onopen = () => {
+                document.getElementById('ws-status').textContent = 'Connected';
+                document.getElementById('ws-indicator').className = 'status-indicator status-connected';
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('ws-status').textContent = 'Disconnected';
+                document.getElementById('ws-indicator').className = 'status-indicator status-disconnected';
+                setTimeout(connectWebSocket, 3000);
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateUI(data);
+            };
+        }
+        
+        // Update UI with incoming data
+        function updateUI(data) {
+            // Base GPS
+            document.getElementById('base-lat').textContent = data.base.lat.toFixed(7);
+            document.getElementById('base-lon').textContent = data.base.lon.toFixed(7);
+            document.getElementById('base-alt').textContent = data.base.alt.toFixed(2) + ' m';
+            document.getElementById('base-eph').textContent = data.base.eph ? data.base.eph.toFixed(2) : '--';
+            document.getElementById('base-fix').textContent = data.base.fix_type || '--';
+            document.getElementById('base-sats').textContent = data.base.sats || '--';
+            
+            // Drone GPS
+            document.getElementById('drone-lat').textContent = data.drone.lat.toFixed(7);
+            document.getElementById('drone-lon').textContent = data.drone.lon.toFixed(7);
+            document.getElementById('drone-alt').textContent = data.drone.alt.toFixed(2) + ' m';
+            document.getElementById('drone-eph').textContent = data.drone.eph ? data.drone.eph.toFixed(2) : '--';
+            
+            // Tracker state
+            document.getElementById('tracker-az').textContent = data.tracker.azimuth.toFixed(2) + '°';
+            document.getElementById('tracker-el').textContent = data.tracker.elevation.toFixed(2) + '°';
+            document.getElementById('current-mode').textContent = data.tracker.mode.toUpperCase();
+        }
+        
+        // Joystick control
+        const joystick = document.getElementById('joystick');
+        const handle = document.getElementById('joystick-handle');
+        
+        joystick.addEventListener('mousedown', startJoystick);
+        document.addEventListener('mousemove', moveJoystick);
+        document.addEventListener('mouseup', stopJoystick);
+        
+        function startJoystick(e) {
+            joystickActive = true;
+            const rect = joystick.getBoundingClientRect();
+            joystickCenter = {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2
+            };
+        }
+        
+        function moveJoystick(e) {
+            if (!joystickActive) return;
+            
+            const dx = e.clientX - joystickCenter.x;
+            const dy = e.clientY - joystickCenter.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const maxDistance = 70;
+            
+            let x = dx;
+            let y = dy;
+            
+            if (distance > maxDistance) {
+                x = (dx / distance) * maxDistance;
+                y = (dy / distance) * maxDistance;
+            }
+            
+            handle.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+            
+            // Send control command
+            const azDelta = (x / maxDistance) * 5; // Scale to degrees
+            const elDelta = -(y / maxDistance) * 5;
+            
+            sendManualControl(azDelta, elDelta);
+        }
+        
+        function stopJoystick() {
+            joystickActive = false;
+            handle.style.transform = 'translate(-50%, -50%)';
+        }
+        
+        // API calls
+        function sendManualControl(azDelta, elDelta) {
+            fetch('/api/manual_control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'move',
+                    azimuth_delta: azDelta,
+                    elevation_delta: elDelta
+                })
+            });
+        }
+        
+        function toggleMode() {
+            fetch('/api/manual_control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'mode_toggle' })
+            });
+        }
+        
+        function calibrate() {
+            fetch('/api/calibrate', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => alert('Calibration started'));
+        }
+        
+        // Initialize
+        connectWebSocket();
+    </script>
+</body>
+</html>
