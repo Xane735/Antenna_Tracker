@@ -19,9 +19,9 @@ BASE_MODE_DEFAULT = "static"     # "static" (freeze after 10s) or "dynamic"
 # --- Endpoints ---
 SIM_DRONE_ENDPOINT = "udp:0.0.0.0:14550"
 SIM_DRONE_BAUD     = None
-DRONE_ENDPOINT     = "/dev/ttyUSB1"
+DRONE_ENDPOINT     = "/dev/ttyUSB0"
 DRONE_BAUD         = 57600
-BASE_ENDPOINT      = "/dev/ttyACM1"
+BASE_ENDPOINT      = "/dev/ttyACM0"
 BASE_BAUD          = 57600
 
 # MAVLink stream requests
@@ -316,11 +316,13 @@ def set_latest_base(sample: GpsSample):
     global _latest_base
     with _base_lock:
         _latest_base = sample
+        print(f"[BASE] lat={sample.lat:.7f}, lon={sample.lon:.7f}, alt={sample.alt:.2f}m, fix={sample.fix_type}, sats={sample.sats}")
 
 def set_latest_drone(sample: GpsSample):
     global _latest_drone
     with _drone_lock:
         _latest_drone = sample
+        print(f"[DRONE] lat={sample.lat:.7f}, lon={sample.lon:.7f}, alt={sample.alt:.2f}m, fix={sample.fix_type}, sats={sample.sats}")
 
 def get_latest_base() -> Optional[GpsSample]:
     with _base_lock:

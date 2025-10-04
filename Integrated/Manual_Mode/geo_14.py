@@ -8,7 +8,7 @@ from datetime import datetime
 import threading
 from typing import Optional, Tuple, Callable
 import time
-from tracker_ui_server import update_base_gps, update_drone_gps, update_tracker_state
+from main import update_base_gps, update_drone_gps, update_tracker_state
 import pigpio
 from pymavlink import mavutil
 import azi_elev_5 as tracker

@@ -2,7 +2,7 @@
 <html>
 <head>
     <title>Antenna Tracker UI</title>
-    <link rel="stylesheet" href="ui.css">
+    <link rel="stylesheet" href="static/ui.css">
 </head>
 </head>
 <body>
@@ -75,6 +75,14 @@
                     <div class="data-item">
                         <div class="data-label">HDOP</div>
                         <div class="data-value" id="drone-eph">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">Fix Type</div>
+                        <div class="data-value" id="drone-fix">--</div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">Satellites</div>
+                        <div class="data-value" id="drone-sats">--</div>
                     </div>
                     <div class="data-item">
                         <div class="data-label">Azimuth</div>
@@ -155,7 +163,9 @@
             document.getElementById('drone-lon').textContent = data.drone.lon.toFixed(7);
             document.getElementById('drone-alt').textContent = data.drone.alt.toFixed(2) + ' m';
             document.getElementById('drone-eph').textContent = data.drone.eph ? data.drone.eph.toFixed(2) : '--';
-            
+            document.getElementById('drone-fix').textContent = data.drone.fix_type || '--';
+            document.getElementById('drone-sats').textContent = data.drone.sats || '--';
+
             // Tracker state
             document.getElementById('tracker-az').textContent = data.tracker.azimuth.toFixed(2) + '°';
             document.getElementById('tracker-el').textContent = data.tracker.elevation.toFixed(2) + '°';

@@ -14,6 +14,8 @@ import threading
 
 app = FastAPI()
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # Global state to store latest GPS data
 latest_gps_data = {
     "base": {
