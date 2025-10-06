@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Tuple, Callable, Dict, Any
-
+import copy
 import pigpio
 from pymavlink import mavutil
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -16,13 +16,11 @@ from fastapi.staticfiles import StaticFiles
 import os, sqlite3
 from fastapi import HTTPException
 from fastapi.responses import Response
-
-
-# If your az/el math lives elsewhere, import it
-# Replace with your real module:
-import azi_elev_5 as tracker  # must provide get_tracking_info(base_lat, base_lon, base_alt, d_lat, d_lon, d_alt) -> {"azimuth": ..., "elevation": ...}
+import azi_elev_5 as tracker
 
 # ===================== FastAPI app =====================
+state_lock = threading.Lock()
+
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -83,7 +81,10 @@ def _sample_to_dict(sample) -> Dict[str, Any]:
     }
 
 async def _push_ws_update():
-    await manager.broadcast(latest_gps_data)
+    with state_lock:
+        payload = copy.deepcopy(latest_gps_data)
+    await manager.broadcast(payload)
+
 
 def _schedule_ws_update():
     if EVENT_LOOP and EVENT_LOOP.is_running():
@@ -95,19 +96,23 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         # initial snapshot
-        await websocket.send_json(latest_gps_data)
-        # periodic keep-alive broadcast (optional)
+        with state_lock:
+            payload = copy.deepcopy(latest_gps_data)
+        await websocket.send_json(payload)
+        # periodic keep-alive
         while True:
             await asyncio.sleep(0.1)
-            await manager.broadcast(latest_gps_data)
+            with state_lock:
+                payload = copy.deepcopy(latest_gps_data)
+            await manager.broadcast(payload)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
 # ---------- REST ----------
 @app.get("/api/gps")
 async def get_gps_data():
-    return latest_gps_data
-
+    with state_lock:
+        return copy.deepcopy(latest_gps_data)
 @app.get("/")
 async def get_ui():
     with open("ui.html", "r", encoding="utf-8") as f:
@@ -153,7 +158,7 @@ SERVO_EL_PIN = 17
 
 UPDATE_PERIOD_S = 0.05
 PRINT_PERIOD_S  = 1.0
-LOG_TO_CSV      = True
+LOG_TO_CSV      = False
 LOG_RAW_GPS     = False
 
 base_static = {"lat": 13.0276802, "lon": 77.5629616, "alt": 924.36}
@@ -289,11 +294,11 @@ def _open_mbtiles():
     try:
         row = _mb_conn.execute("SELECT value FROM metadata WHERE name='format'").fetchone()
         if row and row["value"]:
-            _mb_format = row["value"].lower()  # 'png' or 'jpg' / 'jpeg'
+            val = row["value"].lower()
+            _mb_format = "jpg" if val in ("jpeg", "jpg") else val
     except Exception:
         pass
     print(f"[MAP] MBTiles ready: {MBTILES_PATH} (format={_mb_format})")
-
 # ===================== GPS samples & threads =====================
 @dataclass
 class GpsSample:
@@ -336,8 +341,8 @@ def set_latest_base(sample: GpsSample):
     data = _sample_to_dict(sample)
     with _base_lock:
         _latest_base = sample
+    with state_lock:
         latest_gps_data["base"] = data
-    #print(f"[BASE] lat={data['lat']:.7f}, lon={data['lon']:.7f}, alt={data['alt']:.2f}m, fix={data['fix_type']}, sats={data['sats']}")
     _schedule_ws_update()
 
 def set_latest_drone(sample: GpsSample):
@@ -345,8 +350,8 @@ def set_latest_drone(sample: GpsSample):
     data = _sample_to_dict(sample)
     with _drone_lock:
         _latest_drone = sample
+    with state_lock:
         latest_gps_data["drone"] = data
-    print(f"[DRONE] lat={data['lat']:.7f}, lon={data['lon']:.7f}, alt={data['alt']:.2f}m, fix={data['fix_type']}, sats={data['sats']}")
     _schedule_ws_update()
 
 def get_latest_base() -> Optional[GpsSample]:
@@ -762,18 +767,33 @@ async def _startup():
 async def _shutdown():
     if tracker_runner:
         tracker_runner.stop()
+    global _mb_conn
+    if _mb_conn is not None:
+        try:
+            _mb_conn.close()
+            print("[MAP] MBTiles closed")
+        except Exception:
+            pass
+        _mb_conn = None
 
-@app.get("/tiles/{z}/{x}/{y}.png")
-async def get_tile_png(z: int, x: int, y: int):
-    return await _get_tile(z, x, y, force_format="png")
+
+@app.get("/tiles/{z}/{x}/{y}")
+async def get_tile(z: int, x: int, y: int):
+    return await _get_tile(z, x, y)
 
 @app.get("/tiles/{z}/{x}/{y}.jpg")
 async def get_tile_jpg(z: int, x: int, y: int):
     return await _get_tile(z, x, y, force_format="jpg")
 
-async def _get_tile(z: int, x: int, y: int, force_format: str | None = None):
+async def _get_tile(z: int, x: int, y: int):
     if _mb_conn is None:
         raise HTTPException(status_code=404, detail="MBTiles not loaded")
+
+    # Determine format once from metadata
+    fmt = (_mb_format or "png").lower()
+    if fmt in ("pbf", "mvt"):
+        raise HTTPException(status_code=415, detail="Vector MBTiles detected; raster tiles expected")
+
     tms_y = _xyz_to_tms_y(z, y)
     row = _mb_conn.execute(
         "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
@@ -781,10 +801,11 @@ async def _get_tile(z: int, x: int, y: int, force_format: str | None = None):
     ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Tile not found")
-    fmt = (force_format or _mb_format)
-    media = "image/png" if fmt == "png" else "image/jpeg"
-    return Response(bytes(row["tile_data"]), media_type=media)
 
+    media = "image/jpeg" if fmt in ("jpg", "jpeg") else "image/png"
+    # Optional long cache; safe for immutable tiles
+    headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+    return Response(bytes(row["tile_data"]), media_type=media, headers=headers)
 
 # ===================== CLI + uvicorn run =====================
 def parse_args_to_config() -> TrackerConfig:
