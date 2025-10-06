@@ -170,42 +170,6 @@ async def get_ui():
     return HTMLResponse(content=html_content, status_code=200)
 
 
-# ============ Integration Guide ============
-"""
-INTEGRATION WITH YOUR TRACKER CODE (geo_14.py):
-
-1. Import this module at the top of geo_14.py:
-   from tracker_ui_server import update_base_gps, update_drone_gps, update_tracker_state
-
-2. In your GPS reader callbacks (set_latest_base/drone), add:
-   
-   def set_latest_drone(sample: GpsSample):
-       global _latest_drone
-       with _drone_lock:
-           _latest_drone = sample
-       # ADD THIS:
-       update_drone_gps(sample.lat, sample.lon, sample.alt, 
-                       sample.eph, sample.epv, sample.fix_type, sample.sats)
-
-3. In your main loop, after updating servo positions, add:
-   
-   update_tracker_state(get_mode(), world_az, world_el, curr_phys_az, curr_phys_el)
-
-4. Run the FastAPI server in a separate thread:
-   
-   import uvicorn
-   from threading import Thread
-   
-   def run_ui_server():
-       uvicorn.run(app, host="0.0.0.0", port=8000)
-   
-   ui_thread = Thread(target=run_ui_server, daemon=True)
-   ui_thread.start()
-
-5. Access the UI at: http://localhost:8000
-"""
-
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
