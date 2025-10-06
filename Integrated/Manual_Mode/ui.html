@@ -1,9 +1,19 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Antenna Tracker UI</title>
-    <link rel="stylesheet" href="static/ui.css">
+  <title>Antenna Tracker UI</title>
+  <link rel="stylesheet" href="static/ui.css">
+
+  <!-- Add Leaflet dependencies -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  ></script>
 </head>
+
 </head>
 <body>
     <div id="connection-status">
@@ -17,7 +27,7 @@
         <div class="panel">
             <div class="panel-title">Map View</div>
             <div id="map-container">
-                <div id="map-placeholder">
+                <div id="map">
                     <p>📍 Map Area</p>
                     <p style="font-size: 12px; margin-top: 10px;">Place your local map image here</p>
                 </div>
@@ -124,12 +134,12 @@
     </div>
     
     <script>
-        const tiles = L.tileLayer('/tiles/{z}/{x}/{y}', {
-                        maxZoom: 18,
-                        maxNativeZoom: 14 // set this to your mbtiles maxzoom
-                        }).addTo(map);
-
         let map = L.map('map').setView([12.9716, 77.5946], 12);
+            const tiles = L.tileLayer('/tiles/{z}/{x}/{y}', {
+            maxZoom: 18,
+            maxNativeZoom: 14
+            }).addTo(map);
+
         let ws;
         let joystickActive = false;
         let joystickCenter = { x: 0, y: 0 };

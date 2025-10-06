@@ -19,7 +19,7 @@ from fastapi.responses import Response
 import azi_elev_5 as tracker
 
 # ===================== FastAPI app =====================
-state_lock = threading.Lock()
+#state_lock = threading.Lock()
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -81,8 +81,8 @@ def _sample_to_dict(sample) -> Dict[str, Any]:
     }
 
 async def _push_ws_update():
-    with state_lock:
-        payload = copy.deepcopy(latest_gps_data)
+    #with state_lock:
+    payload = copy.deepcopy(latest_gps_data)
     await manager.broadcast(payload)
 
 
@@ -96,14 +96,14 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         # initial snapshot
-        with state_lock:
-            payload = copy.deepcopy(latest_gps_data)
+        #with state_lock:
+        payload = copy.deepcopy(latest_gps_data)
         await websocket.send_json(payload)
         # periodic keep-alive
         while True:
             await asyncio.sleep(0.1)
-            with state_lock:
-                payload = copy.deepcopy(latest_gps_data)
+            #with state_lock:
+            payload = copy.deepcopy(latest_gps_data)
             await manager.broadcast(payload)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -111,8 +111,8 @@ async def websocket_endpoint(websocket: WebSocket):
 # ---------- REST ----------
 @app.get("/api/gps")
 async def get_gps_data():
-    with state_lock:
-        return copy.deepcopy(latest_gps_data)
+    #with state_lock:
+    return copy.deepcopy(latest_gps_data)
 @app.get("/")
 async def get_ui():
     with open("ui.html", "r", encoding="utf-8") as f:
@@ -341,7 +341,7 @@ def set_latest_base(sample: GpsSample):
     data = _sample_to_dict(sample)
     with _base_lock:
         _latest_base = sample
-    with state_lock:
+    #with state_lock:
         latest_gps_data["base"] = data
     _schedule_ws_update()
 
@@ -350,7 +350,7 @@ def set_latest_drone(sample: GpsSample):
     data = _sample_to_dict(sample)
     with _drone_lock:
         _latest_drone = sample
-    with state_lock:
+    #with state_lock:
         latest_gps_data["drone"] = data
     _schedule_ws_update()
 
