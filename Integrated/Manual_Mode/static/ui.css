@@ -38,13 +38,15 @@
         }
         
         /* Top Left - Map */
+        #map { height: 100%; width: 100%; }
+        
         #map-container {
             display: flex;
             align-items: center;
             justify-content: center;
             background: #1a1a1a;
             border-radius: 4px;
-            height: calc(100% - 40px);
+            height: 480px;
         }
         
         #map-placeholder {

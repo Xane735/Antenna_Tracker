@@ -10,21 +10,22 @@ from typing import Optional, Tuple, Callable, Dict, Any
 import copy
 import pigpio
 from pymavlink import mavutil
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Body, HTTPException
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 import os, sqlite3
 from fastapi import HTTPException
 from fastapi.responses import Response
 import azi_elev_5 as tracker
+import sqlite3, os, struct
 
 # ===================== FastAPI app =====================
-#state_lock = threading.Lock()
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ---------- Shared state for UI ----------
+MBTILES_PATH = "maps/local.mbtiles"  # put your path here
 latest_gps_data: Dict[str, Any] = {
     "base":   {"lat": 0.0, "lon": 0.0, "alt": 0.0, "eph": None, "epv": None, "fix_type": None, "sats": None, "timestamp": None},
     "drone":  {"lat": 0.0, "lon": 0.0, "alt": 0.0, "eph": None, "epv": None, "fix_type": None, "sats": None, "timestamp": None},
@@ -85,7 +86,6 @@ async def _push_ws_update():
     payload = copy.deepcopy(latest_gps_data)
     await manager.broadcast(payload)
 
-
 def _schedule_ws_update():
     if EVENT_LOOP and EVENT_LOOP.is_running():
         asyncio.run_coroutine_threadsafe(_push_ws_update(), EVENT_LOOP)
@@ -118,6 +118,68 @@ async def get_ui():
     with open("ui.html", "r", encoding="utf-8") as f:
         html_content = f.read()
     return HTMLResponse(content=html_content, status_code=200)
+
+@app.post("/api/manual_control")
+async def api_manual_control(payload: dict = Body(...)):
+    """
+    Payload shapes:
+      {"action":"mode_toggle"}
+      {"action":"move","azimuth_delta": <deg>, "elevation_delta": <deg>}
+    """
+    global MANUAL_MODE
+    action = (payload.get("action") or "").lower()
+
+    if action == "mode_toggle":
+        MANUAL_MODE = not MANUAL_MODE
+        latest_gps_data["tracker"]["mode"] = "manual" if MANUAL_MODE else "auto"
+        return {"ok": True, "mode": latest_gps_data["tracker"]["mode"]}
+
+    if action == "move":
+        daz = float(payload.get("azimuth_delta", 0.0) or 0.0)
+        delv = float(payload.get("elevation_delta", 0.0) or 0.0)
+        with MANUAL_LOCK:
+            MANUAL_CMD["daz"] += daz
+            MANUAL_CMD["del"] += delv
+        return {"ok": True}
+
+    return {"ok": False, "error": "unknown action"}
+
+def _flip_y_slippy_to_tms(z, y):
+    return (1 << z) - 1 - y
+
+def _open_mb():
+    if not os.path.exists(MBTILES_PATH):
+        raise FileNotFoundError(MBTILES_PATH)
+    conn = sqlite3.connect(MBTILES_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+_mb_conn = _open_mb()
+
+
+@app.post("/api/calibrate")
+async def api_calibrate():
+    """
+    One-tap zero-ref:
+    Capture the *current computed world* az/el and shift offsets so that
+    future tracking uses that as zero reference.
+    """
+    global AZIMUTH_ZERO_OFFSET_DEG, ELEVATION_ZERO_OFFSET_DEG
+
+    world_az = float(latest_gps_data["tracker"].get("azimuth", 0.0) or 0.0)
+    world_el = float(latest_gps_data["tracker"].get("elevation", 0.0) or 0.0)
+
+    # Shift world so the current direction becomes (0, 0) after apply_calibration()
+    AZIMUTH_ZERO_OFFSET_DEG   = norm360(-world_az)
+    ELEVATION_ZERO_OFFSET_DEG = -world_el
+
+    return {
+        "ok": True,
+        "new_offsets": {
+            "azimuth_zero_offset_deg": AZIMUTH_ZERO_OFFSET_DEG,
+            "elevation_zero_offset_deg": ELEVATION_ZERO_OFFSET_DEG,
+        }
+    }
 
 # ===================== Tracker config & constants =====================
 
@@ -184,6 +246,14 @@ EL_WEIGHT = 0.30
 FLIP_STYLE = "keep_el"
 FLIP_AZ_CORR_DEG = 0.0
 FLIP_EL_CORR_DEG = 0.0
+
+MANUAL_LOCK = threading.Lock()
+MANUAL_MODE = False
+MANUAL_CMD = {"daz": 0.0, "del": 0.0}  # accumulated deltas from joystick
+
+# Make calibration offsets mutable (leave names as-is so apply_calibration keeps working)
+AZIMUTH_ZERO_OFFSET_DEG   = 0.0   # was constant; keep as global float
+ELEVATION_ZERO_OFFSET_DEG = 0.0   # was constant; keep as global float
 
 def norm360(x: float) -> float:
     return (x + 360.0) % 360.0
@@ -619,6 +689,34 @@ class TrackerRunner:
                 d = get_latest_drone()
                 if not d:
                     time.sleep(0.01); continue
+            # --- Manual override: consume joystick deltas and move servos ---
+                if MANUAL_MODE:
+                    # Pull and clear accumulated deltas atomically
+                    with MANUAL_LOCK:
+                        daz = MANUAL_CMD["daz"]; MANUAL_CMD["daz"] = 0.0
+                        delv = MANUAL_CMD["del"]; MANUAL_CMD["del"] = 0.0
+
+                    # Scale/sanitize (optional): you can keep joystick deltas small; here we just apply directly
+                    if daz or delv:
+                        curr_phys_az = wrap360(curr_phys_az + daz)
+                        curr_phys_el = max(EL_PHYS_MIN, min(EL_PHYS_MAX, curr_phys_el + delv))
+
+                        s_az, s_el = physical_to_servo_deg(curr_phys_az, curr_phys_el)
+                        us_az = servo_deg_to_us_az(s_az)
+                        us_el = servo_deg_to_us(s_el)
+
+                        try:
+                            pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
+                            pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
+                        except Exception as e:
+                            print(f"[WARN] pigpio write (manual): {e}")
+
+                        latest_gps_data["tracker"]["phys_az"] = curr_phys_az
+                        latest_gps_data["tracker"]["phys_el"] = curr_phys_el
+
+                    time.sleep(cfg.update_period)
+                    continue  # skip auto-tracking this cycle
+
 
                 # Base selection
                 if cfg.mode == "sim":
@@ -777,9 +875,36 @@ async def _shutdown():
         _mb_conn = None
 
 
-@app.get("/tiles/{z}/{x}/{y}")
-async def get_tile(z: int, x: int, y: int):
-    return await _get_tile(z, x, y)
+@app.get("/tiles/{z}/{x}/{y}.pbf")
+def get_vector_tile(z: int, x: int, y: int):
+    try:
+        tms_y = _flip_y_slippy_to_tms(z, y)
+        cur = _mb_conn.cursor()
+        cur.execute(
+            "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
+            (z, x, tms_y),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=204, detail="No tile")
+        data = row["tile_data"]
+
+        # Many MBTiles store MVT compressed with gzip.
+        # If starts with gzip magic (0x1f,0x8b), set Content-Encoding.
+        is_gzip = len(data) >= 2 and data[0] == 0x1F and data[1] == 0x8B
+        headers = {}
+        if is_gzip:
+            headers["Content-Encoding"] = "gzip"
+
+        return Response(
+            content=data,
+            media_type="application/x-protobuf",
+            headers=headers,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tiles/{z}/{x}/{y}.jpg")
 async def get_tile_jpg(z: int, x: int, y: int):

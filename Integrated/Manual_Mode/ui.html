@@ -12,6 +12,8 @@
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   ></script>
+  <script src="https://unpkg.com/leaflet.vectorgrid/dist/Leaflet.VectorGrid.bundled.js"></script>
+
 </head>
 
 </head>
@@ -134,11 +136,27 @@
     </div>
     
     <script>
-        let map = L.map('map').setView([12.9716, 77.5946], 12);
-            const tiles = L.tileLayer('/tiles/{z}/{x}/{y}', {
-            maxZoom: 18,
-            maxNativeZoom: 14
-            }).addTo(map);
+        const map = L.map('map', {
+            center: [12.9716, 77.5946], // Bengaluru
+            zoom: 12
+        });
+            const vtile = L.vectorGrid.protobuf('/tiles/{z}/{x}/{y}.pbf', {
+                // Keep it simple at first; you can style per-layer once you inspect metadata.vector_layers
+                maxNativeZoom: 14,   // adjust to your MBTiles max zoom
+                maxZoom: 18,
+                vectorTileLayerStyles: {
+                // Fallback style if you don't know layer names yet:
+                // This applies to any layer.
+                // You can later read metadata.json.vector_layers to list exact names (roads, water, etc.)
+                '': { weight: 1 }
+                },
+                interactive: false
+            });
+        const vt = L.vectorGrid.protobuf('/tiles/{z}/{x}/{y}.pbf', {
+        maxNativeZoom: 14,
+        maxZoom: 18,
+        vectorTileLayerStyles: (layerName) => ({ color: '#888', weight: 0.8, fill: true, fillColor: '#555' })
+        }).addTo(map);
 
         let ws;
         let joystickActive = false;
