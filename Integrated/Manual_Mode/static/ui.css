@@ -38,16 +38,22 @@
         }
         
         /* Top Left - Map */
-        #map { height: 100%; width: 100%; }
-        
         #map-container {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #1a1a1a;
-            border-radius: 4px;
-            height: 480px;
-        }
+  display: block;           /* <-- key change */
+  background: #1a1a1a;
+  border-radius: 4px;
+  height: 480px;            /* you can change this */
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+#map {
+  height: 100%;
+  width: 100%;
+  display: block;
+}
+
         
         #map-placeholder {
             color: #555;

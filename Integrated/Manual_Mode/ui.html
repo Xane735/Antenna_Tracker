@@ -136,27 +136,28 @@
     </div>
     
     <script>
-        const map = L.map('map', {
-            center: [12.9716, 77.5946], // Bengaluru
-            zoom: 12
+        const map = L.map('map', { center:[12.9716,77.5946], zoom:12 });
+setTimeout(() => map.invalidateSize(), 0);
+
+        const styleAll = (props, z, geom) => ({
+            color: '#888',
+            weight: geom === 1 ? 1.2 : 0.8,
+            fill: geom !== 1,
+            fillColor: '#555',
+            fillOpacity: 0.5
         });
-            const vtile = L.vectorGrid.protobuf('/tiles/{z}/{x}/{y}.pbf', {
-                // Keep it simple at first; you can style per-layer once you inspect metadata.vector_layers
-                maxNativeZoom: 14,   // adjust to your MBTiles max zoom
-                maxZoom: 18,
-                vectorTileLayerStyles: {
-                // Fallback style if you don't know layer names yet:
-                // This applies to any layer.
-                // You can later read metadata.json.vector_layers to list exact names (roads, water, etc.)
-                '': { weight: 1 }
-                },
-                interactive: false
-            });
-        const vt = L.vectorGrid.protobuf('/tiles/{z}/{x}/{y}.pbf', {
-        maxNativeZoom: 14,
-        maxZoom: 18,
-        vectorTileLayerStyles: (layerName) => ({ color: '#888', weight: 0.8, fill: true, fillColor: '#555' })
+        const anyLayerStyles = new Proxy({}, { get: () => styleAll });
+
+        L.vectorGrid.protobuf('/tiles/{z}/{x}/{y}.pbf', {
+            maxNativeZoom: 14,
+            maxZoom: 18,
+            vectorTileLayerStyles: anyLayerStyles,
+            rendererFactory: L.canvas.tile
         }).addTo(map);
+
+        // If your grid becomes visible after layout, force resize:
+        setTimeout(()=>map.invalidateSize(), 0);
+        console.log('map size', document.getElementById('map').getBoundingClientRect());
 
         let ws;
         let joystickActive = false;
