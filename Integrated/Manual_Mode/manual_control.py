@@ -4,6 +4,7 @@
 #      - 'q' to quit (KeyboardInterrupt)
 #    Moves servos as you nudge; returns (curr_phys_az, curr_phys_el).
 #    Sets AZIMUTH_ZERO_OFFSET_RT / ELEVATION_ZERO_OFFSET_RT globals.
+# If pynput does not work, just remove it and use awsd keys.
 
 from pynput import keyboard
 from pynput.keyboard import Key
