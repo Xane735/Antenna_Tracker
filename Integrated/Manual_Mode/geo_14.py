@@ -1,18 +1,16 @@
-#Integration of Manual mode and Auto mode
-# geo_14.py — Tracker with static/dynamic base modes + Manual Mode
-# To test: Manual Calibration and Manual Mode.
+# geo_14.py — zero-filter tracker with static/dynamic base modes and manual calibration
+
+import pigpio
+from pymavlink import mavutil
+import azi_elev_5 as tracker
 
 import argparse
+import time
 from dataclasses import dataclass
 from datetime import datetime
 import threading
 from typing import Optional, Tuple, Callable
 import time
-from main import update_base_gps, update_drone_gps, update_tracker_state
-import pigpio
-from pymavlink import mavutil
-import azi_elev_5 as tracker
-from manual_control import ManualController
 
 # ===================== Defaults =====================
 
@@ -29,7 +27,7 @@ BASE_BAUD          = 57600
 
 # MAVLink stream requests
 MAV_MSG_INTERVAL_US_GPS    = 200_000   # microseconds - 5 Hz (typical GPS) 
-MAV_MSG_INTERVAL_US_GLOBAL = 50_000    # microseconds - 20 Hz (raise to 50_000 for ~20 Hz if supported)
+MAV_MSG_INTERVAL_US_GLOBAL = 50_000    # microseconds - 5 Hz (raise to 50_000 for ~20 Hz if supported)
 
 # Gear spokes ratios
 SPOKES_SMALL   = 12
@@ -105,13 +103,7 @@ FLIP_STYLE = "keep_el"          # "mirror_el" or "keep_el"
 FLIP_AZ_CORR_DEG = 0.0          # add/subtract small az bias ONLY when flipped
 FLIP_EL_CORR_DEG = 0.0          # add/subtract small el bias ONLY when flipped
 
-MODE_AUTO = "auto"
-MODE_MANUAL = "manual"
-_current_mode_lock = threading.Lock()
-_current_mode = MODE_AUTO  # will be overriden by --start-mode
-
-CAL_FILE = "calibration.json"  # ADD
-CAL = {"az_zero_offset_deg": 0.0, "el_zero_offset_deg": 0.0} 
+STEP_DEG = 20.0 # Step for Manual Calibration
 
 # ===================== Helpers =====================
 
@@ -126,16 +118,20 @@ def shortest_delta_deg(target: float, current: float) -> float:
     # returns signed delta in (−180, +180]
     return ((target - current + 540.0) % 360.0) - 180.0
 
-def apply_calibration(az: float, el: float) -> Tuple[float, float]:
-    # add fixed trims + dynamic zero offsets, then handle inversions
-    az = norm360(az + AZIMUTH_ZERO_OFFSET_DEG + CAL["az_zero_offset_deg"])
-    el = el + ELEVATION_ZERO_OFFSET_DEG + CAL["el_zero_offset_deg"]
+def apply_calibration(world_az: float, world_el: float):
+
+    az_off = AZIMUTH_ZERO_OFFSET_RT if 'AZIMUTH_ZERO_OFFSET_RT' in globals() else AZIMUTH_ZERO_OFFSET_DEG
+    el_off = ELEVATION_ZERO_OFFSET_RT if 'ELEVATION_ZERO_OFFSET_RT' in globals() else ELEVATION_ZERO_OFFSET_DEG
+
+    az = norm360(world_az + az_off)
+    el = world_el + el_off
+
     if AZIMUTH_INVERT:
         az = norm360(360.0 - az)
     if ELEVATION_INVERT:
         el = -el
-    return az, el
 
+    return az, el
 
 def world_to_physical(az: float, el: float) -> Tuple[float, float]:
     return (max(AZ_PHYS_MIN, min(AZ_PHYS_MAX, az)),
@@ -236,6 +232,7 @@ def choose_flipped_if_better(A_saz, B_saz, cost_A, cost_B, only_flip_near_edge=T
     last_flip_t = st.get("_last_flip_t", 0.0)
     last_flip_saz = st.get("_last_flip_saz", None)
 
+
     def near_edge(saz: float) -> bool:
     # seam is at 0° and 180° in SERVO space
         return (saz <= EDGE) or (saz >= (180.0 - EDGE))
@@ -279,105 +276,6 @@ def servo_deg_to_us_az(servo_deg: float) -> float:
     phys_az = d * float(AZ_GEAR_RATIO)
     return az_phys_to_us(phys_az)
 
-def get_mode():
-    with _current_mode_lock:
-        return _current_mode
-
-def set_mode(m):
-    global _current_mode
-    with _current_mode_lock:
-        _current_mode = m
-
-def toggle_mode():
-    global _current_mode
-    with _current_mode_lock:
-        _current_mode = MODE_MANUAL if _current_mode == MODE_AUTO else MODE_AUTO
-        print(f"[MODE] Switching ---> {_current_mode.upper()}")
-
-def load_calibration():
-    import json, os
-    if os.path.exists(CAL_FILE):
-        with open(CAL_FILE, "r") as f:
-            CAL.update(json.load(f))
-        print(f"[CAL] Loaded: AZ_OFF={CAL['az_zero_offset_deg']:.2f}°, EL_OFF={CAL['el_zero_offset_deg']:.2f}°")
-
-def save_calibration():
-    import json
-    with open(CAL_FILE, "w") as f:
-        json.dump(CAL, f, indent=2)
-    print(f"[CAL] Saved: AZ_OFF={CAL['az_zero_offset_deg']:.2f}°, EL_OFF={CAL['el_zero_offset_deg']:.2f}°")
-
-def calibrate_simple(pi, args, manual_ctrl, curr_phys_az, curr_phys_el, persist=True):
-    """
-    1) Switch to MANUAL
-    2) Use WASD to aim the antenna where 'world zero' should be
-    3) Press 'm' to finish; we set zero to that pose
-    4) Restart automation cleanly and return updated state
-    """
-    print("\n[CAL] Quick calibration: use WASD (SHIFT = faster). Press 'm' when done.\n")
-    set_mode(MODE_MANUAL)
-
-    # compact manual loop (no extra features)
-    next_print = time.time()
-    while get_mode() == MODE_MANUAL:
-        daz, delv = manual_ctrl.read_command(timeout=args.update_period)  # returns (Δaz°, Δel°)
-        if daz or delv:
-            curr_phys_az = wrap360(curr_phys_az + daz)
-            curr_phys_el = max(EL_PHYS_MIN, min(EL_PHYS_MAX, curr_phys_el + delv))
-            s_az, s_el = physical_to_servo_deg(curr_phys_az, curr_phys_el)
-            pi.set_servo_pulsewidth(SERVO_AZ_PIN, servo_deg_to_us_az(s_az))
-            pi.set_servo_pulsewidth(SERVO_EL_PIN, servo_deg_to_us(s_el))
-
-        if time.time() >= next_print:
-            print(f"[{datetime.now():%H:%M:%S}] CAL  PHYS={curr_phys_az:6.2f}/{curr_phys_el:5.2f}°  (press 'm' to accept)")
-            next_print += float(args.print_period)
-
-    # --- loop ends when user presses 'm' and mode flips back to AUTO ---
-
-    # Compute offsets so WORLD(0,0) maps to the pose you just aimed at
-    if AZIMUTH_INVERT:
-        CAL["az_zero_offset_deg"] = norm360((360.0 - curr_phys_az) - AZIMUTH_ZERO_OFFSET_DEG)
-    else:
-        CAL["az_zero_offset_deg"] = norm360(curr_phys_az - AZIMUTH_ZERO_OFFSET_DEG)
-
-    if ELEVATION_INVERT:
-        CAL["el_zero_offset_deg"] = -(curr_phys_el) - ELEVATION_ZERO_OFFSET_DEG
-    else:
-        CAL["el_zero_offset_deg"] =  (curr_phys_el) - ELEVATION_ZERO_OFFSET_DEG
-
-    if persist:
-        save_calibration()
-
-    # Clean automation restart so new offsets take effect smoothly
-    last_servo_az, last_servo_el, curr_phys_az, curr_phys_el = reset_automation_state(pi, args)
-    return last_servo_az, last_servo_el, curr_phys_az, curr_phys_el
-
-
-def reset_automation_state(pi, args):
-    """
-    Called when switching MANUAL → AUTO to restart the automation cleanly.
-    - Clears flip chooser history
-    - Parks to home smoothly (or face-drone if you prefer)
-    - Resets last/current servo/phys state aligned to park target
-    Returns (last_servo_az, last_servo_el, curr_phys_az, curr_phys_el)
-    """
-    # Clear flip memory
-    try:
-        st = choose_flipped_if_better.__dict__
-        st.pop("_last_flip_t", None)
-        st.pop("_last_flip_saz", None)
-    except Exception:
-        pass
-
-    # Park to home (you can choose face_drone if you like)
-    cal_azH, cal_elH = apply_calibration(args.park_home_az, args.park_home_el)
-    phys_azH, phys_elH = world_to_physical(cal_azH, cal_elH)
-    s_azH, s_elH = physical_to_servo_deg(phys_azH, phys_elH)
-    smooth_park(pi, s_azH, s_elH, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
-    time.sleep(0.05)
-
-    # Align automation state to parked pos
-    return float(s_azH), float(s_elH), float(phys_azH), float(phys_elH)
 
 # ===================== Thread-safe latest GPS =====================
 
@@ -421,17 +319,11 @@ def set_latest_base(sample: GpsSample):
     global _latest_base
     with _base_lock:
         _latest_base = sample
-        update_drone_gps(sample.lat, sample.lon, sample.alt, 
-                       sample.eph, sample.epv, sample.fix_type, sample.sats)
-
 
 def set_latest_drone(sample: GpsSample):
     global _latest_drone
     with _drone_lock:
         _latest_drone = sample
-        update_drone_gps(sample.lat, sample.lon, sample.alt, 
-                       sample.eph, sample.epv, sample.fix_type, sample.sats)
-
 
 def get_latest_base() -> Optional[GpsSample]:
     with _base_lock:
@@ -605,168 +497,73 @@ def log_close():
     if _log_file: _log_file.close()
     if _raw_file: _raw_file.close()
 
-# ===================== Manual Control =====================
+# ===================== Manual Calibration =====================
 
-# === add two tight loops with cooperative yielding ===
-def run_manual_loop(pi, args, state_reader, manual_ctrl,
-                    curr_phys_az, curr_phys_el):
-    """
-    state_reader(): returns a dict with keys:
-        'world_az','world_el','b_lat','b_lon','b_alt','base_mode_str','base_locked','d','b'
-    For manual loop, we don't use the world angles to move, but we DO keep logging & printing.
-    """
-    print("[MANUAL] Use WASD (hold SHIFT for faster). 'm' to return to AUTO. 'q' quick-park home.")
-    next_print = time.time()
-    last_servo_az, last_servo_el = physical_to_servo_deg(curr_phys_az, curr_phys_el)
-
-    while get_mode() == MODE_MANUAL:
-        daz, delv = manual_ctrl.read_command(timeout=args.update_period)
-        if daz != 0.0 or delv != 0.0:
-            # update physical angles with clamps/wrap
-            curr_phys_az = wrap360(curr_phys_az + daz)
-            curr_phys_el = max(EL_PHYS_MIN, min(EL_PHYS_MAX, curr_phys_el + delv))
-
-            s_az, s_el = physical_to_servo_deg(curr_phys_az, curr_phys_el)
-            us_az = servo_deg_to_us_az(s_az)
-            us_el = servo_deg_to_us(s_el)
-            pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
-            pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
-            last_servo_az, last_servo_el = s_az, s_el
-
-            update_tracker_state(get_mode(), 0.0, 0.0, curr_phys_az, curr_phys_el)
-            
-        # optional periodic console + CSV logging with latest telemetry
-        info = state_reader()   # non-blocking snapshot
-        if info and time.time() >= next_print:
-            print(f"[{datetime.now():%H:%M:%S}] MANUAL "
-                  f"PHYS {curr_phys_az:6.2f}/{curr_phys_el:5.2f}° | "
-                  f"SERVO {last_servo_az:6.2f}/{last_servo_el:5.2f}°")
-            next_print += float(args.print_period)
-
-        # best-effort CSV row (mark UsedFlip=0 in manual)
-        try:
-            if info:
-                d = info['d']; b_lat, b_lon, b_alt = info['b_lat'], info['b_lon'], info['b_alt']
-                s_az, s_el = last_servo_az, last_servo_el
-                us_az, us_el = servo_deg_to_us_az(s_az), servo_deg_to_us(s_el)
-                log_row(
-                    datetime.now().isoformat(timespec='seconds'),
-                    "manual", 1 if info['base_locked'] else 0,
-                    "", "",  "", "",
-                    round(curr_phys_az,3), round(curr_phys_el,3),
-                    round(s_az,3), round(s_el,3),
-                    round(us_az,1), round(us_el,1),
-                    "" if not d else round(d.lat,7), "" if not d else round(d.lon,7), "" if not d else round(d.alt,2),
-                    round(b_lat,7), round(b_lon,7), round(b_alt,2),
-                    0.0, 0.0,
-                    "", "",
-                    0
-                )
-        except Exception:
-            pass
-
-    # return latest physical angles to feed into AUTO restart logic if needed
-    return curr_phys_az, curr_phys_el
-
-def run_auto_tick(pi, args, last_servo_az, last_servo_el, curr_phys_az, curr_phys_el):
-    """
-    One iteration of your existing automation logic factored into a function.
-    Returns updated (last_servo_az, last_servo_el, curr_phys_az, curr_phys_el).
-    """
-    d = get_latest_drone()
-    if not d:
-        time.sleep(0.01); return last_servo_az, last_servo_el, curr_phys_az, curr_phys_el
-
-    # --- BASE selection copied from main loop ---
-    if args.mode == "sim":
-        b_lat, b_lon, b_alt = base_static["lat"], base_static["lon"], base_static["alt"]
-        base_mode_str = "static(SIM)"
-        base_fix = base_sats = None
-        base_locked = True
-    else:
-        # static vs dynamic as in your code:
-        # we reuse a cached 'base_fixed' via closure on outer variables (see integration below)
-        if run_auto_tick._base_mode == "static":
-            if run_auto_tick._base_fixed is None:
-                b_now = get_latest_base()
-                if not b_now:
-                    time.sleep(0.01); return last_servo_az, last_servo_el, curr_phys_az, curr_phys_el
-                run_auto_tick._base_fixed = (b_now.lat, b_now.lon, b_now.alt)
-                print(f"[INFO] Base frozen late to lat={run_auto_tick._base_fixed[0]:.7f}, lon={run_auto_tick._base_fixed[1]:.7f}, alt={run_auto_tick._base_fixed[2]:.2f}")
-            b_lat, b_lon, b_alt = run_auto_tick._base_fixed
-            base_mode_str = "static"
-            base_fix = base_sats = None
-            base_locked = True
-        else:
-            b = get_latest_base()
-            if not b:
-                time.sleep(0.01); return last_servo_az, last_servo_el, curr_phys_az, curr_phys_el
-            b_lat, b_lon, b_alt = b.lat, b.lon, b.alt
-            base_mode_str = "dynamic"
-            base_fix = getattr(b, "fix_type", None)
-            base_sats = getattr(b, "sats", None)
-            base_locked = False
-
-    info = tracker.get_tracking_info(b_lat, b_lon, b_alt, d.lat, d.lon, d.alt)
-    if not info:
-        time.sleep(args.update_period); return last_servo_az, last_servo_el, curr_phys_az, curr_phys_el
-
-    world_az = info['azimuth']
-    world_el = info['elevation']
-
-    cal_az, cal_el = apply_calibration(world_az, world_el)
-    tgt_phys_az, tgt_phys_el, used_flip = pick_target(cal_az, cal_el, last_servo_az, last_servo_el)
-
-    az_step_max = float(AZ_MAX_DEG_PER_SEC) * float(args.update_period)
-    el_step_max = float(EL_MAX_DEG_PER_SEC) * float(args.update_period)
-
-    d_az = shortest_delta_deg(tgt_phys_az, curr_phys_az)
-    d_el = tgt_phys_el - curr_phys_el
-    d_az = max(-az_step_max, min(az_step_max, d_az))
-    d_el = max(-el_step_max, min(el_step_max, d_el))
-
-    curr_phys_az = wrap360(curr_phys_az + d_az)
-    curr_phys_el = max(EL_PHYS_MIN, min(EL_PHYS_MAX, curr_phys_el + d_el))
-
-    s_az, s_el = physical_to_servo_deg(curr_phys_az, curr_phys_el)
-    us_az = servo_deg_to_us_az(s_az)
-    us_el = servo_deg_to_us(s_el)
-    pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
-    pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
-    last_servo_az, last_servo_el = s_az, s_el
+def calibrate_simple(
+    pi,
+    curr_phys_az: float,
+    curr_phys_el: float,
+    step_deg: float,
+    desired_world_az: float = 0.0,
+    desired_world_el: float = 0.0
+):
     
-    update_tracker_state(get_mode(), world_az, world_el, curr_phys_az, curr_phys_el)
+    global AZIMUTH_ZERO_OFFSET_RT, ELEVATION_ZERO_OFFSET_RT
 
-    # paced print
-    now = time.time()
-    if now >= run_auto_tick._next_print:
-        print(f"[{datetime.now():%H:%M:%S}] Base={base_mode_str} "
-              f"WORLD {world_az:6.2f}/{world_el:5.2f}° | "
-              f"PHYS {curr_phys_az:6.2f}/{curr_phys_el:5.2f}° | "
-              f"SERVO {s_az:6.2f}/{s_el:5.2f}° | us {us_az:5.0f}/{us_el:5.0f}"
-              f"{' | FLIP' if used_flip else ''}")
-        run_auto_tick._next_print += float(run_auto_tick._print_period)
+    print("\n[CAL] Manual calibration")
+    print(f"[CAL] Controls: a/d=AZ±{step_deg}°, w/s=EL±{step_deg}°, m=commit zero, q=quit")
+    print(f"[CAL] Target world zero => az={desired_world_az:.1f}°, el={desired_world_el:.1f}°\n")
 
-    # CSV
-    log_row(
-        datetime.now().isoformat(timespec='seconds'),
-        base_mode_str, 1 if base_locked else 0,
-        round(world_az,3), round(world_el,3),
-        round(cal_az,3), round(cal_el,3),
-        round(curr_phys_az,3), round(curr_phys_el,3),
-        round(s_az,3), round(s_el,3),
-        round(us_az,1), round(us_el,1),
-        round(d.lat,7), round(d.lon,7), round(d.alt,2),
-        round(b_lat,7), round(b_lon,7), round(b_alt,2),
-        0.0, 0.0,
-        "" if base_fix is None else base_fix,
-        "" if base_sats is None else base_sats,
-        1 if used_flip else 0
-    )
+    def _drive_now():
+        s_az, s_el = physical_to_servo_deg(curr_phys_az, curr_phys_el)
+        us_az      = servo_deg_to_us_az(s_az)
+        us_el      = servo_deg_to_us(s_el)
+        pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
+        pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
+        print(f"[CAL] PHYS az={curr_phys_az:6.2f}° el={curr_phys_el:5.2f}° | SERVO az={s_az:6.2f}° el={s_el:5.2f}°")
 
-    time.sleep(args.update_period)
-    return last_servo_az, last_servo_el, curr_phys_az, curr_phys_el
+    # show current pose on entry
+    _drive_now()
 
+    while True:
+        cmd = input("[CAL] (a/d/w/s, m=commit, q=quit) > ").strip().lower()
+        if (cmd == 'a'):
+            curr_phys_az = wrap360(curr_phys_az - step_deg)
+            _drive_now()
+        elif (cmd == 'd'):
+            curr_phys_az = wrap360(curr_phys_az + step_deg)
+            _drive_now()
+        elif (cmd == 'w'):
+            curr_phys_el = min(EL_PHYS_MAX, curr_phys_el + step_deg)
+            _drive_now()
+        elif (cmd == 's'):
+            curr_phys_el = max(EL_PHYS_MIN, curr_phys_el - step_deg)
+            _drive_now()
+        elif cmd == 'm':
+            # Compute runtime zero so that (desired_world_az/el) maps to current *physical* pose
+            # Handle inversion flags the same way your main pipeline does.
+            if 'AZIMUTH_INVERT' in globals() and AZIMUTH_INVERT:
+                # curr_phys = 360 - (desired + offset)  (wrapped)
+                t = wrap360(360.0 - curr_phys_az)
+                AZIMUTH_ZERO_OFFSET_RT = wrap360(t - desired_world_az)
+            else:
+                AZIMUTH_ZERO_OFFSET_RT = wrap360(curr_phys_az - desired_world_az)
+
+            if 'ELEVATION_INVERT' in globals() and ELEVATION_INVERT:
+                # curr_phys = -(desired + offset)
+                ELEVATION_ZERO_OFFSET_RT = -curr_phys_el - desired_world_el
+            else:
+                ELEVATION_ZERO_OFFSET_RT = curr_phys_el - desired_world_el
+
+            print(f"[CAL] Runtime zero set: AZ_OFF={AZIMUTH_ZERO_OFFSET_RT:.2f}°, "
+                  f"EL_OFF={ELEVATION_ZERO_OFFSET_RT:.2f}°")
+            return curr_phys_az, curr_phys_el
+
+        elif cmd == 'q':
+            raise KeyboardInterrupt
+
+        elif cmd:
+            print("[CAL] Unknown key. Use a/d/w/s, 'm' to commit, 'q' to quit.")
 
 # ===================== Main =====================
 
@@ -795,11 +592,6 @@ def main():
     ap.add_argument("--servo-min-us", dest="servo_min_us", type=float, default=None)
     ap.add_argument("--servo-max-us", dest="servo_max_us", type=float, default=None)
 
-    ap.add_argument("--start-mode", choices=[MODE_AUTO, MODE_MANUAL], default=MODE_AUTO,
-                    help="Start in auto or manual mode (toggle with 'm')")
-    ap.add_argument("--manual-step", type=float, default=2.0, help="WASD step in degrees")
-    ap.add_argument("--manual-step-fast", type=float, default=8.0, help="Shift+WASD step in degrees")
-
     args = ap.parse_args()
 
     # Apply optional overrides
@@ -813,33 +605,50 @@ def main():
     PULSE_MIN_US  = float(PULSE_MIN_US)
     PULSE_MAX_US  = float(PULSE_MAX_US)
 
-    load_calibration()
-
-    print("=== geo_13 + Manual Mode (sim/ground) — static/dynamic base, zero-ref, smooth parking ===")
-    print(f"[CFG] Mode: {args.mode} | BaseMode: {args.base_mode} | StartMode: {args.start_mode}")
-    print(f"[CFG] Gear AZ {AZ_GEAR_RATIO}:1, EL {EL_GEAR_RATIO}:1 | Servo 180° @ {PULSE_MIN_US}-{PULSE_MAX_US}µs")
+    print("=== geo_10 (sim/ground) — static/dynamic base, zero-ref, smooth parking — NO FILTERING ===")
+    print(f"[CFG] Mode: {args.mode} | BaseMode: {args.base_mode} | Gear AZ {AZ_GEAR_RATIO}:1, EL {EL_GEAR_RATIO}:1 | Servo 180° @ {PULSE_MIN_US}-{PULSE_MAX_US}µs")
     print(f"[CFG] update_period={args.update_period:.2f}s, print_period={args.print_period:.1f}s")
     print(f"[CFG] parking: home=({args.park_home_az:.1f}°, {args.park_home_el:.1f}°) face_drone(start={args.park_face_drone_start}, exit={args.park_face_drone_exit}) duration={args.park_duration:.2f}s @ {args.park_rate_hz:.0f} Hz")
-    print(f"[CFG] manual steps: {args.manual_step}° / {args.manual_step_fast}° (with SHIFT)")
 
-
-    # pigpio + logs
     pi = setup_pigpio()
     log_open(prefix="Tracker")
 
-    # initial park to home
+    # --- Initial parking happens BEFORE MAV readers start ---
     print("[INFO] Parking to home based on fixed zero (no learned zero).")
+
+    # Park to world (0°, home-EL); this is your logical zero
     phys_az0, phys_el0 = world_to_physical(args.park_home_az, args.park_home_el)
     s_az0, s_el0 = physical_to_servo_deg(phys_az0, phys_el0)
     smooth_park(pi, s_az0, s_el0, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
+
     time.sleep(0.1)
 
     last_servo_az = float(s_az0)
     last_servo_el = float(s_el0)
-    curr_phys_az  = float(phys_az0)
-    curr_phys_el  = float(phys_el0)
 
-    # Connect MAVs + readers
+    curr_phys_az = phys_az0
+    curr_phys_el = phys_el0
+
+    # === Simple manual calibration right after parking ===
+    try:
+        # Use 5° (or 10°) steps as you prefer
+        curr_phys_az, curr_phys_el = calibrate_simple(
+            pi,
+            curr_phys_az=curr_phys_az,
+            curr_phys_el=curr_phys_el,
+            step_deg = STEP_DEG,
+            desired_world_az=args.park_home_az, 
+            desired_world_el=args.park_home_el
+        )
+        # Optionally recompute servo angles for logging continuity
+        s_az_after, s_el_after = physical_to_servo_deg(curr_phys_az, curr_phys_el)
+        last_servo_az, last_servo_el = s_az_after, s_el_after
+        print("[CAL] Field zero set; AUTO will now use runtime offsets.")
+    except KeyboardInterrupt:
+        print("[CAL] Calibration aborted by user.")
+        raise
+
+    # Start readers
     if args.mode == "sim":
         mav_drone = connect_mav(SIM_DRONE_ENDPOINT, SIM_DRONE_BAUD, True)
         start_reader(mav_drone, "DRONE", on_raw=log_raw if LOG_RAW_GPS else None)
@@ -850,80 +659,144 @@ def main():
         start_reader(mav_drone, "DRONE", on_raw=log_raw if LOG_RAW_GPS else None)
         start_reader(mav_base,  "BASE",  on_raw=log_raw if LOG_RAW_GPS else None)
 
-    # Base mode bootstrap used inside run_auto_tick (closured variables)
-    run_auto_tick._base_mode   = args.base_mode
-    run_auto_tick._base_fixed  = None
-    run_auto_tick._print_period = float(args.print_period)
-    run_auto_tick._next_print   = time.time()
-
-    # start manual controller (even if starting in AUTO; we need 'm' hotkey)
-    set_mode(args.start_mode)
-    manual_ctrl = ManualController(
-        on_toggle_mode=toggle_mode,
-        on_quick_park=lambda: smooth_park(pi, *physical_to_servo_deg(*world_to_physical(args.park_home_az, args.park_home_el)),
-                                          duration_s=args.park_duration, rate_hz=args.park_rate_hz),
-        step_deg=args.manual_step,
-        step_deg_fast=args.manual_step_fast,
-        poll_hz=max(30.0, 1.0/args.update_period)
-    )
-    manual_ctrl.start()
-
-    # a light “state reader” for manual logging/printing
-    def state_reader():
-        d = get_latest_drone()
-        if args.mode == "sim":
-            b_lat, b_lon, b_alt = base_static["lat"], base_static["lon"], base_static["alt"]
-            return {'d': d, 'b_lat': b_lat, 'b_lon': b_lon, 'b_alt': b_alt,
-                    'base_mode_str': 'static(SIM)', 'base_locked': True}
-        else:
-            if args.base_mode == "static":
-                if run_auto_tick._base_fixed:
-                    b_lat, b_lon, b_alt = run_auto_tick._base_fixed
-                else:
-                    b = get_latest_base()
-                    if not b: return None
-                    b_lat, b_lon, b_alt = b.lat, b.lon, b.alt
-                return {'d': d, 'b_lat': b_lat, 'b_lon': b_lon, 'b_alt': b_alt,
-                        'base_mode_str': 'static', 'base_locked': True}
+    # ----- Base mode handling (ground only) -----
+    base_fixed = None  # (lat, lon, alt) when static
+    if args.mode == "ground":
+        if args.base_mode == "static":
+            print(f"[INFO] Base mode=static → collecting {args.static_window_sec:.1f}s, then freezing to average.")
+            t_end = time.time() + float(args.static_window_sec)
+            lats, lons, alts = [], [], []
+            while time.time() < t_end:
+                b_try = get_latest_base()
+                if b_try:
+                    lats.append(b_try.lat); lons.append(b_try.lon); alts.append(b_try.alt)
+                time.sleep(0.05)
+            if lats:
+                base_fixed = (sum(lats)/len(lats), sum(lons)/len(lons), sum(alts)/len(alts))
+                print(f"[INFO] Base frozen avg: lat={base_fixed[0]:.7f}, lon={base_fixed[1]:.7f}, alt={base_fixed[2]:.2f}")
             else:
-                b = get_latest_base()
-                if not b: return None
-                return {'d': d, 'b_lat': b.lat, 'b_lon': b.lon, 'b_alt': b.alt,
-                        'base_mode_str': 'dynamic', 'base_locked': False}
+                print("[WARN] No base GPS during static window; will freeze on first base sample in the main loop.")
+        else:
+            print("[INFO] Base mode=dynamic → always use latest base GPS.")
 
+    # ===== Zero-reference setup =====
     print("[INFO] Point the tracker at the drone and stabilize GPS.")
     time.sleep(4.0)
 
+    next_print = time.time()
+    
     try:
         while True:
-            mode = get_mode()
+            # --- DRONE (latest) ---
+            d = get_latest_drone()
+            if not d:
+                time.sleep(0.01); continue
 
-            if mode == MODE_AUTO:
-                # ADD: run calibration once on entry to AUTO
-                if main._last_mode != MODE_AUTO:
-                    (last_servo_az, last_servo_el,
-                    curr_phys_az, curr_phys_el) = calibrate_simple(
-                        pi, args, manual_ctrl, curr_phys_az, curr_phys_el, persist=True
-                    )
+            # --- BASE (by mode) ---
+            if args.mode == "sim":
+                b_lat, b_lon, b_alt = base_static["lat"], base_static["lon"], base_static["alt"]
+                base_mode_str = "static(SIM)"
+                base_fix = base_sats = None
+                base_locked = True
+            else:
+                if args.base_mode == "static":
+                    if base_fixed is None:
+                        b_now = get_latest_base()
+                        if not b_now:
+                            time.sleep(0.01); continue
+                        base_fixed = (b_now.lat, b_now.lon, b_now.alt)
+                        print(f"[INFO] Base frozen late to lat={base_fixed[0]:.7f}, lon={base_fixed[1]:.7f}, alt={base_fixed[2]:.2f}")
+                    b_lat, b_lon, b_alt = base_fixed
+                    base_mode_str = "static"
+                    base_fix = base_sats = None
+                    base_locked = True
+                else:
+                    b = get_latest_base()
+                    if not b:
+                        time.sleep(0.01); continue
+                    b_lat, b_lon, b_alt = b.lat, b.lon, b.alt
+                    base_mode_str = "dynamic"
+                    base_fix = getattr(b, "fix_type", None)
+                    base_sats = getattr(b, "sats", None)
+                    base_locked = False
 
-                # existing AUTO tick
-                last_servo_az, last_servo_el, curr_phys_az, curr_phys_el = run_auto_tick(
-                    pi, args, last_servo_az, last_servo_el, curr_phys_az, curr_phys_el
-                )
+            # --- Angles (NO filtering) ---
+            info = tracker.get_tracking_info(b_lat, b_lon, b_alt, d.lat, d.lon, d.alt)
+            if not info:
+                time.sleep(args.update_period); continue
 
-            elif mode == MODE_MANUAL:
-                # optional: you may keep/run your standalone manual loop here
-                curr_phys_az, curr_phys_el = run_manual_loop(pi, args, state_reader, manual_ctrl,
-                                                            curr_phys_az, curr_phys_el)
+            abs_az = info['azimuth']
+            abs_el = info['elevation']
+            world_az = abs_az
+            world_el = abs_el
 
-            main._last_mode = mode
+            # --- Calibration → pick normal vs backside by servo-distance ---
+            cal_az, cal_el = apply_calibration(world_az, world_el)
+            tgt_phys_az, tgt_phys_el, used_flip = pick_target(cal_az, cal_el, last_servo_az, last_servo_el)
+
+            # --- Per-tick max step (deg/tick) using the current update period ---
+            az_step_max = float(AZ_MAX_DEG_PER_SEC) * float(args.update_period)
+            el_step_max = float(EL_MAX_DEG_PER_SEC) * float(args.update_period)
+
+            # --- Shortest-path deltas in PHYSICAL space ---
+            d_az = shortest_delta_deg(tgt_phys_az, curr_phys_az)   # in (−180, +180]
+            d_el = tgt_phys_el - curr_phys_el                      # EL doesn't wrap
+
+            # --- Clamp step to keep it snappy but safe (prevents 180° wrap jumps) ---
+            if d_az >  az_step_max: d_az =  az_step_max
+            if d_az < -az_step_max: d_az = -az_step_max
+            if d_el >  el_step_max: d_el =  el_step_max
+            if d_el < -el_step_max: d_el = -el_step_max
+
+            # --- Advance the physical state; keep az wrapped and el clamped ---
+            curr_phys_az = wrap360(curr_phys_az + d_az)
+            curr_phys_el = max(EL_PHYS_MIN, min(EL_PHYS_MAX, curr_phys_el + d_el))
+
+            # --- Now map CURRENT physical state → servo → pulse ---
+            s_az, s_el = physical_to_servo_deg(curr_phys_az, curr_phys_el)
+            us_az      = servo_deg_to_us_az(s_az)
+            us_el      = servo_deg_to_us(s_el)
+
+            # --- Drive servos ---
+            pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
+            pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
+            last_servo_az, last_servo_el = s_az, s_el
+
+            # Console output (paced)
+            if time.time() >= next_print:
+                print(f"[{datetime.now():%H:%M:%S}] Base={base_mode_str} "
+                    f"WORLD {world_az:6.2f}/{world_el:5.2f}° | "
+                    f"PHYS {curr_phys_az:6.2f}/{curr_phys_el:5.2f}° | "
+                    f"SERVO {s_az:6.2f}/{s_el:5.2f}° | us {us_az:5.0f}/{us_el:5.0f}"
+                    f"{' | FLIP' if used_flip else ''}")
+                next_print += float(args.print_period)
+
+            # CSV log
+            log_row(
+                datetime.now().isoformat(timespec='seconds'),
+                base_mode_str, 1 if base_locked else 0,
+                round(world_az,3), round(world_el,3),
+                round(cal_az,3), round(cal_el,3),
+                round(curr_phys_az,3), round(curr_phys_el,3),
+                round(s_az,3), round(s_el,3),
+                round(us_az,1), round(us_el,1),
+                round(d.lat,7), round(d.lon,7), round(d.alt,2),
+                round(b_lat,7), round(b_lon,7), round(b_alt,2),
+                0.0, 0.0,
+                "" if base_fix is None else base_fix,
+                "" if base_sats is None else base_sats,
+                1 if used_flip else 0    
+            )
+
+            time.sleep(args.update_period)
+
     except KeyboardInterrupt:
         print("\n[INFO] Stopped by user")
     finally:
         print("[INFO] Smooth shutdown: parking…")
         try:
-            # same parking cleanup as your original
             if args.park_face_drone_exit:
+                # Keep current AZ; ramp EL → home
                 cal_azH, cal_elH = apply_calibration(0.0, args.park_home_el)
                 phys_azH, phys_elH = world_to_physical(cal_azH, cal_elH)
                 s_azH = last_servo_az

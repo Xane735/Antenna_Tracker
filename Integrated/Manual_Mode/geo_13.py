@@ -1,5 +1,9 @@
 # geo_13.py — zero-filter tracker with static/dynamic base modes
 
+import pigpio
+from pymavlink import mavutil
+import azi_elev_5 as tracker
+
 import argparse
 import time
 from dataclasses import dataclass
@@ -7,10 +11,6 @@ from datetime import datetime
 import threading
 from typing import Optional, Tuple, Callable
 import time
-
-import pigpio
-from pymavlink import mavutil
-import azi_elev_5 as tracker
 
 # ===================== Defaults =====================
 
