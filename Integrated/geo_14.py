@@ -316,13 +316,13 @@ def set_latest_base(sample: GpsSample):
     global _latest_base
     with _base_lock:
         _latest_base = sample
-        print(f"[BASE] lat={sample.lat:.7f}, lon={sample.lon:.7f}, alt={sample.alt:.2f}m, fix={sample.fix_type}, sats={sample.sats}")
+        #print(f"[BASE] lat={sample.lat:.7f}, lon={sample.lon:.7f}, alt={sample.alt:.2f}m, fix={sample.fix_type}, sats={sample.sats}")
 
 def set_latest_drone(sample: GpsSample):
     global _latest_drone
     with _drone_lock:
         _latest_drone = sample
-        print(f"[DRONE] lat={sample.lat:.7f}, lon={sample.lon:.7f}, alt={sample.alt:.2f}m, fix={sample.fix_type}, sats={sample.sats}")
+        #print(f"[DRONE] lat={sample.lat:.7f}, lon={sample.lon:.7f}, alt={sample.alt:.2f}m, fix={sample.fix_type}, sats={sample.sats}")
 
 def get_latest_base() -> Optional[GpsSample]:
     with _base_lock:
