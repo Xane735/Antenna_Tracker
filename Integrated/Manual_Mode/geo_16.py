@@ -1,4 +1,4 @@
-# geo_14.py — zero-filter tracker with static/dynamic base modes and manual calibration + UI integration
+# geo_14.py — zero-filter tracker with static/dynamic base modes and manual calibration
 
 import pigpio
 from pymavlink import mavutil
@@ -11,7 +11,6 @@ from datetime import datetime
 import threading
 from typing import Optional, Tuple, Callable
 import time
-from tracker_ui import start_ui, publish_status
 
 # ===================== Defaults =====================
 
@@ -104,7 +103,7 @@ FLIP_STYLE = "keep_el"          # "mirror_el" or "keep_el"
 FLIP_AZ_CORR_DEG = 0.0          # add/subtract small az bias ONLY when flipped
 FLIP_EL_CORR_DEG = 0.0          # add/subtract small el bias ONLY when flipped
 
-STEP_DEG = 20.0 # Step for Manual Calibration
+STEP_DEG = 10.0 # Step for Manual Calibration
 
 # ===================== Helpers =====================
 
@@ -277,6 +276,15 @@ def servo_deg_to_us_az(servo_deg: float) -> float:
     phys_az = d * float(AZ_GEAR_RATIO)
     return az_phys_to_us(phys_az)
 
+def world_to_servo_targets(world_az: float, world_el: float) -> tuple[float, float]:
+    """
+    Convert desired *world* angles to *servo* angles, applying the same
+    calibration/inversion/limits the main loop uses.
+    """
+    cal_az, cal_el = apply_calibration(world_az, world_el)
+    phys_az, phys_el = world_to_physical(cal_az, cal_el)
+    s_az, s_el = physical_to_servo_deg(phys_az, phys_el)
+    return s_az, s_el
 
 # ===================== Thread-safe latest GPS =====================
 
@@ -521,22 +529,6 @@ def calibrate_simple(
         us_el      = servo_deg_to_us(s_el)
         pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
         pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
-        # inside calibrate_simple._drive_now(), right after the two pi.set_servo_pulsewidth(...) lines
-        publish_status(
-        base_mode="CAL",
-        base_locked=False,
-        base_lat=None, base_lon=None, base_alt=None,
-        base_fix=None, base_sats=None,
-        drone_lat=None, drone_lon=None, drone_alt=None,
-        world_az=0.0, world_el=0.0,
-        cal_az=0.0, cal_el=0.0,
-        phys_az=curr_phys_az, phys_el=curr_phys_el,
-        servo_az=s_az, servo_el=s_el,
-        us_az=us_az, us_el=us_el,
-        used_flip=False
-    )
-
-
         print(f"[CAL] PHYS az={curr_phys_az:6.2f}° el={curr_phys_el:5.2f}° | SERVO az={s_az:6.2f}° el={s_el:5.2f}°")
 
     # show current pose on entry
@@ -544,10 +536,10 @@ def calibrate_simple(
 
     while True:
         cmd = input("[CAL] (a/d/w/s, m=commit, q=quit) > ").strip().lower()
-        if (cmd == 'a'):
+        if (cmd == 'd'):
             curr_phys_az = wrap360(curr_phys_az - step_deg)
             _drive_now()
-        elif (cmd == 'd'):
+        elif (cmd == 'a'):
             curr_phys_az = wrap360(curr_phys_az + step_deg)
             _drive_now()
         elif (cmd == 'w'):
@@ -630,31 +622,14 @@ def main():
     pi = setup_pigpio()
     log_open(prefix="Tracker")
 
-    # Start web UI server
-    start_ui(host="0.0.0.0", port=8000)
-
     # --- Initial parking happens BEFORE MAV readers start ---
     print("[INFO] Parking to home based on fixed zero (no learned zero).")
 
     # Park to world (0°, home-EL); this is your logical zero
-    phys_az0, phys_el0 = world_to_physical(args.park_home_az, args.park_home_el)
-    s_az0, s_el0 = physical_to_servo_deg(phys_az0, phys_el0)
+    s_az0, s_el0 = world_to_servo_targets(args.park_home_az, args.park_home_el)
+    phys_az0, phys_el0 = (s_az0 * AZ_GEAR_RATIO, s_el0 * EL_GEAR_RATIO)  # for UI/log continuity
+
     smooth_park(pi, s_az0, s_el0, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
-
-    publish_status(
-    base_mode="INIT",
-    base_locked=False,
-    base_lat=None, base_lon=None, base_alt=None,
-    base_fix=None, base_sats=None,
-    drone_lat=None, drone_lon=None, drone_alt=None,
-    world_az=args.park_home_az, world_el=args.park_home_el,
-    cal_az=args.park_home_az, cal_el=args.park_home_el,  # or computed
-    phys_az=phys_az0, phys_el=phys_el0,
-    servo_az=s_az0, servo_el=s_el0,
-    us_az=servo_deg_to_us_az(s_az0), us_el=servo_deg_to_us(s_el0),
-    used_flip=False
-    )
-
 
     time.sleep(0.1)
 
@@ -795,22 +770,6 @@ def main():
             # --- Drive servos ---
             pi.set_servo_pulsewidth(SERVO_AZ_PIN, us_az)
             pi.set_servo_pulsewidth(SERVO_EL_PIN, us_el)
-            publish_status(
-            base_mode=base_mode_str,
-            base_locked=base_locked,
-            base_lat=b_lat, base_lon=b_lon, base_alt=b_alt,
-            base_fix=base_fix, base_sats=base_sats,
-            drone_lat=(d.lat if d else None),
-            drone_lon=(d.lon if d else None),
-            drone_alt=(d.alt if d else None),
-            world_az=world_az, world_el=world_el,
-            cal_az=cal_az, cal_el=cal_el,
-            phys_az=curr_phys_az, phys_el=curr_phys_el,
-            servo_az=s_az, servo_el=s_el,
-            us_az=us_az, us_el=us_el,
-            used_flip=used_flip
-        )
-
             last_servo_az, last_servo_el = s_az, s_el
 
             # Console output (paced)
@@ -847,18 +806,14 @@ def main():
         print("[INFO] Smooth shutdown: parking…")
         try:
             if args.park_face_drone_exit:
-                # Keep current AZ; ramp EL → home
-                cal_azH, cal_elH = apply_calibration(0.0, args.park_home_el)
-                phys_azH, phys_elH = world_to_physical(cal_azH, cal_elH)
-                s_azH = last_servo_az
-                s_elH = physical_to_servo_deg(phys_azH, phys_elH)[1]
+                # Keep the current azimuth, park elevation to home value
+                _, s_elH = world_to_servo_targets(args.park_home_az, args.park_home_el)
+                s_azH = last_servo_az  # preserve last known AZ
                 smooth_park(pi, s_azH, s_elH, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
             else:
-                cal_azH, cal_elH = apply_calibration(args.park_home_az, args.park_home_el)
-                phys_azH, phys_elH = world_to_physical(cal_azH, cal_elH)
-                s_azH, s_elH = physical_to_servo_deg(phys_azH, phys_elH)
+                # Park both AZ and EL to home position (0,0 by default)
+                s_azH, s_elH = world_to_servo_targets(args.park_home_az, args.park_home_el)
                 smooth_park(pi, s_azH, s_elH, duration_s=args.park_duration, rate_hz=args.park_rate_hz)
-
             time.sleep(0.2)
             pi.set_servo_pulsewidth(SERVO_AZ_PIN, 0)
             pi.set_servo_pulsewidth(SERVO_EL_PIN, 0)
