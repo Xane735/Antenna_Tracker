@@ -25,7 +25,7 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ---------- Shared state for UI ----------
-MBTILES_PATH = "maps/local.mbtiles"  # put your path here
+MBTILES_PATH = "maps/local_2.mbtiles"  # put your path here
 latest_gps_data: Dict[str, Any] = {
     "base":   {"lat": 0.0, "lon": 0.0, "alt": 0.0, "eph": None, "epv": None, "fix_type": None, "sats": None, "timestamp": None},
     "drone":  {"lat": 0.0, "lon": 0.0, "alt": 0.0, "eph": None, "epv": None, "fix_type": None, "sats": None, "timestamp": None},
