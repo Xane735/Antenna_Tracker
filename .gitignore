@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+
+# Logs & large data
+logs/
+*.log
+*.tmp
+*.bak
+
+# Large CSVs (but allow a few sample ones)
+data/**/*.csv
+!data/gps_validation/10m.csv
+!data/gps_validation/15m.csv
+!data/gps_validation/25m.csv
+!data/gps_validation/35m.csv
+!data/gps_validation/data.csv
+
+# Maps / tiles (if large)
+*.mbtiles
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Misc
+*.swp
